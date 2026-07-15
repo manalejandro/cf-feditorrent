@@ -4,6 +4,7 @@ import type {
   Queue,
   Fetcher,
   DurableObjectNamespace,
+  R2Bucket,
 } from "@cloudflare/workers-types";
 
 export type { D1Database, KVNamespace, Queue, Fetcher, DurableObjectNamespace };
@@ -36,6 +37,7 @@ export interface SendEmail {
 export interface CloudflareEnv {
   DB: D1Database;
   TORRENTS_KV: KVNamespace;
+  FILES: R2Bucket;
   DELIVERY_QUEUE: Queue;
   TRACKER: DurableObjectNamespace;
   ASSETS: Fetcher;

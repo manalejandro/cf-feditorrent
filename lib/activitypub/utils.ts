@@ -116,7 +116,10 @@ export function buildTorrentNote(
   const desc = options.description ? `<p>${escapeHtml(options.description)}</p>` : "";
   const sizeStr = formatSize(options.size);
   const metaHtml = `<p>📦 ${sizeStr} | ${options.fileCount} files | <code>${escapeHtml(options.infoHash.slice(0, 16))}...</code></p>`;
-  const content = `${nameHtml}${desc}${magnetHtml}${metaHtml}${linkHtml}`;
+  const torrentFileHtml = options.torrentFileUrl
+    ? `<p>📥 <a href="${escapeHtml(options.torrentFileUrl)}">Download .torrent</a></p>`
+    : "";
+  const content = `${nameHtml}${desc}${magnetHtml}${torrentFileHtml}${metaHtml}${linkHtml}`;
 
   return {
     "@context": DEFAULT_CONTEXT,
@@ -133,6 +136,7 @@ export function buildTorrentNote(
     torrentMagnetUri: options.magnetUri,
     torrentSize: options.size,
     torrentFileCount: options.fileCount,
+    torrentFileUrl: options.torrentFileUrl,
   } as APTorrent;
 }
 

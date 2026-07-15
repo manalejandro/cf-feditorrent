@@ -8,6 +8,7 @@ const PERMANENT_ERRORS = new Set([400, 401, 403, 404, 410, 422]);
 interface Env {
   DB: D1Database;
   TORRENTS_KV: KVNamespace;
+  FILES: R2Bucket;
   DELIVERY_QUEUE: Queue;
   TRACKER: DurableObjectNamespace;
   ASSETS: Fetcher;
@@ -52,8 +53,82 @@ async function deliverOne(
   }
 }
 
+function hexFromUrl(url: string): string {
+  let m = url.match(/[?&]info_hash=([^&]+)/);
+  if (!m) return "";
+  let raw = m[1];
+  let hex = "";
+  for (let i = 0; i < raw.length; i++) {
+    if (raw[i] === "%" && i + 2 < raw.length) {
+      hex += raw.slice(i + 1, i + 3).toLowerCase();
+      i += 2;
+    } else {
+      hex += raw.charCodeAt(i).toString(16).padStart(2, "0");
+    }
+  }
+  if (hex.length !== 40) return "";
+  return hex;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    if (url.pathname === "/api/tracker/announce") {
+      const infoHashHex = hexFromUrl(request.url);
+      if (!infoHashHex) {
+        return new Response("d14:failure reason32:Missing or invalid info_hashe", { status: 400, headers: { "Content-Type": "text/plain" } });
+      }
+      const kvEntry = await env.TORRENTS_KV.get(infoHashHex);
+      if (!kvEntry) {
+        return new Response("d14:failure reason22:Torrent not authorizede", { status: 403, headers: { "Content-Type": "text/plain" } });
+      }
+      return new Response("d8:intervali30e12:min intervali10e8:completei0e10:incompletei0e5:peers0:e", { headers: { "Content-Type": "text/plain" } });
+    }
+    // Serve files directly from R2 (bypasses Next.js for large file streaming)
+    const fileMatch = url.pathname.match(/^\/api\/files\/([^\/]+)\/(.+)$/);
+    if (fileMatch) {
+      const infoHash = fileMatch[1];
+      const filename = decodeURIComponent(fileMatch[2]);
+      const obj = await env.FILES.get(`torrents/${infoHash}/${filename}`);
+      if (!obj) {
+        return new Response("File not found", { status: 404 });
+      }
+      const size = obj.size ?? 0;
+      const rangeHeader = request.headers.get("range");
+
+      if (rangeHeader) {
+        const m = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+        if (m) {
+          const start = parseInt(m[1]);
+          const end = m[2] ? parseInt(m[2]) : size - 1;
+          if (start >= size || end >= size) {
+            return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${size}` } });
+          }
+          const chunk = await env.FILES.get(`torrents/${infoHash}/${filename}`, { range: { offset: start, length: end - start + 1 } });
+          if (!chunk) {
+            return new Response("File chunk not found", { status: 404 });
+          }
+          return new Response(chunk.body, {
+            status: 206,
+            headers: {
+              "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+              "Content-Range": `bytes ${start}-${end}/${size}`,
+              "Content-Length": String(end - start + 1),
+              "Accept-Ranges": "bytes",
+            },
+          });
+        }
+      }
+
+      return new Response(obj.body, {
+        headers: {
+          "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+          "Content-Length": String(size),
+          "Accept-Ranges": "bytes",
+        },
+      });
+    }
+
     const handler = (await import("../.open-next/worker.js")) as any;
     return handler.default.fetch(request, env, ctx);
   },

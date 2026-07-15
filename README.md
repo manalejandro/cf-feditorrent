@@ -147,6 +147,43 @@ npm run deploy
 - `GET /api/notifications/count` — Unread count
 - `POST /api/notifications/:id/read` — Mark read
 
+## Download Commands
+
+Each torrent page provides a direct download URL, a `.torrent` file, and a magnet link. Here's how to use them with popular clients:
+
+### aria2 (recommended)
+
+```bash
+# Download .torrent file and let aria2 handle everything
+aria2c "https://feditorrent.com/api/files/{infoHash}/{filename}.torrent"
+
+# Or download the file directly via HTTP
+aria2c -x4 -s4 "https://feditorrent.com/api/files/{infoHash}/{filename}"
+
+# Using a magnet link (requires other peers to be seeding)
+aria2c "magnet:?xt=urn:btih:{infoHash}&..."
+```
+
+### WebTorrent (browser)
+
+Open the magnet link directly — WebTorrent supports web seeds and will download from the instance automatically.
+
+### qBittorrent / Transmission / Other BitTorrent clients
+
+1. Download the `.torrent` file from the torrent page
+2. Open it in your client
+3. The client will connect to the tracker and download from available sources
+
+### Direct Download
+
+```bash
+# curl
+curl -L -o filename "https://feditorrent.com/api/files/{infoHash}/{filename}"
+
+# wget
+wget "https://feditorrent.com/api/files/{infoHash}/{filename}"
+```
+
 ## License
 
 MIT

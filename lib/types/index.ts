@@ -56,6 +56,7 @@ export interface APTorrent extends APObject {
   torrentMagnetUri?: string;
   torrentSize?: number;
   torrentFileCount?: number;
+  torrentFileUrl?: string;
 }
 
 export interface APAttachment extends APObject {

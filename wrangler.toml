@@ -32,6 +32,10 @@ database_id = ""
 binding = "TORRENTS_KV"
 id = ""
 
+[[r2_buckets]]
+bucket_name = "cf-feditorrent-files"
+binding = "FILES"
+
 [[queues.producers]]
 binding = "DELIVERY_QUEUE"
 queue = "cf-feditorrent-delivery"

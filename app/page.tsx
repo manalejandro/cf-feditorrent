@@ -2,73 +2,27 @@
 
 import { useState, useEffect, useRef } from "react";
 
-// Minimal bencode parser + encoder for .torrent files
-function bencodeParse(data: Uint8Array, offset = 0): { val: any; end: number } {
-  const b = data[offset];
-  if (b === 0x69) { // i
-    let end = offset + 1;
-    while (data[end] !== 0x65) end++;
-    return { val: parseInt(new TextDecoder().decode(data.slice(offset + 1, end))), end: end + 1 };
-  }
-  if (b >= 0x30 && b <= 0x39) { // string
-    let colon = offset;
-    while (data[colon] !== 0x3a) colon++;
-    const len = parseInt(new TextDecoder().decode(data.slice(offset, colon)));
-    const start = colon + 1;
-    return { val: new TextDecoder().decode(data.slice(start, start + len)), end: start + len };
-  }
-  if (b === 0x6c) { // l
-    let pos = offset + 1; const arr: any[] = [];
-    while (data[pos] !== 0x65) { const r = bencodeParse(data, pos); arr.push(r.val); pos = r.end; }
-    return { val: arr, end: pos + 1 };
-  }
-  if (b === 0x64) { // d
-    let pos = offset + 1; const dict: Record<string, any> = {};
-    while (data[pos] !== 0x65) {
-      const k = bencodeParse(data, pos); const v = bencodeParse(data, k.end);
-      dict[k.val as string] = v.val; pos = v.end;
-    }
-    return { val: dict, end: pos + 1 };
-  }
-  throw new Error("Invalid bencode at " + offset);
-}
-
-function bencodeEncode(val: any): Uint8Array {
-  const enc = new TextEncoder();
-  if (typeof val === "number") return enc.encode("i" + val + "e");
-  if (typeof val === "string") return enc.encode(val.length + ":" + val);
-  if (Array.isArray(val)) return enc.encode("l" + val.map((v) => new TextDecoder().decode(bencodeEncode(v))).join("") + "e");
-  if (typeof val === "object" && val !== null) {
-    const keys = Object.keys(val).sort();
-    return enc.encode("d" + keys.map((k) => new TextDecoder().decode(bencodeEncode(k)) + new TextDecoder().decode(bencodeEncode(val[k]))).join("") + "e");
-  }
-  throw new Error("Cannot encode: " + typeof val);
-}
-
-async function sha1Hex(data: Uint8Array): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-1", data as BufferSource);
-  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 async function parseTorrentFile(file: File): Promise<{ infoHash: string; name: string; magnetUri: string; size: number; fileCount: number } | null> {
   try {
+    const { bencodeParse, bencodeEncode } = await import("@/lib/torrent/bencode");
     const buf = await file.arrayBuffer();
     const raw = new Uint8Array(buf);
     const parsed = bencodeParse(raw);
     const info = parsed.val.info;
     if (!info || typeof info !== "object") return null;
     const rawInfo = bencodeEncode(info);
-    const infoHash = await sha1Hex(rawInfo);
-    const name = info.name || "Torrent";
+    const hash = await crypto.subtle.digest("SHA-1", rawInfo as BufferSource);
+    const infoHash = Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    const name = typeof info.name === "string" ? info.name : (info.name instanceof Uint8Array ? new TextDecoder().decode(info.name) : "Torrent");
     let size = 0; let fileCount = 0;
     if (info.files && Array.isArray(info.files)) {
       fileCount = info.files.length;
-      for (const f of info.files) size += f.length || 0;
+      for (const f of info.files) { const fl = typeof f.length === "number" ? f.length : 0; size += fl; }
     } else {
-      fileCount = 1; size = info.length || 0;
+      fileCount = 1; size = typeof info.length === "number" ? info.length : 0;
     }
-    const magnetUri = `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(name)}`;
-    return { infoHash, name, magnetUri, size, fileCount };
+    const tr = typeof window !== "undefined" ? `${window.location.origin}/api/tracker/announce` : "";
+    return { infoHash, name, magnetUri: `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(name)}${tr ? `&tr=${encodeURIComponent(tr)}` : ""}`, size, fileCount };
   } catch { return null; }
 }
 
@@ -112,6 +66,8 @@ const dict = {
     feature2Desc: "Upload files for browser-to-browser P2P sharing, or share magnet links.",
     feature3: "Open Source",
     feature3Desc: "Built with Next.js, Cloudflare, and ActivityPub. Fully open source.",
+    feature4: "Client Support",
+    feature4Desc: "Download with aria2, qBittorrent, curl, or WebTorrent. Each torrent includes direct download, .torrent, and magnet.",
     login: "Sign In",
     register: "Sign Up",
     logout: "Sign Out",
@@ -215,6 +171,8 @@ const dict = {
     feature2Desc: "Sube archivos para compartir P2P de navegador a navegador, o comparte enlaces magnet.",
     feature3: "Código Abierto",
     feature3Desc: "Construido con Next.js, Cloudflare y ActivityPub. Totalmente open source.",
+    feature4: "Soporte de Clientes",
+    feature4Desc: "Descarga con aria2, qBittorrent, curl o WebTorrent. Cada torrent incluye descarga directa, .torrent y magnet.",
     login: "Iniciar Sesión",
     register: "Registrarse",
     logout: "Cerrar Sesión",
@@ -560,7 +518,7 @@ export default function Home() {
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [mode, setMode] = useState<"magnet" | "upload">("magnet");
+  const [mode, setMode] = useState<"magnet" | "torrent" | "webtorrent">("magnet");
 
   const d = dict[locale];
 
@@ -574,10 +532,10 @@ export default function Home() {
   const [resetting, setResetting] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const folderInputRef = useRef<HTMLInputElement>(null);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isSeeding, setIsSeeding] = useState(false);
   const [seedingInfo, setSeedingInfo] = useState<{ infoHash: string; name: string; magnetUri: string; size: number; fileCount: number } | null>(null);
+  const [torrentView, setTorrentView] = useState<any | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -595,6 +553,13 @@ export default function Home() {
     }
     const rt = params.get("reset-token");
     if (rt) { setResetToken(rt); const url = new URL(window.location.href); url.searchParams.delete("reset-token"); window.history.replaceState({}, "", url.toString()); }
+    const ts = params.get("torrent");
+    if (ts) {
+      fetch(`/torrents/${ts}`, { headers: { Accept: "application/json" } })
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => { if (data) setTorrentView(data); })
+        .catch(() => {});
+    }
   }, []);
 
   const token = typeof window !== "undefined" ? localStorage.getItem("ft_token") : null;
@@ -609,7 +574,7 @@ export default function Home() {
 
   const handleCreate = async () => {
     if (mode === "magnet" && !newMagnet) return;
-    if (mode === "upload" && uploadedFiles.length === 0) return;
+    if (mode === "torrent" && (!seedingInfo || !seedingInfo.magnetUri)) return;
     setCreating(true); setError(""); setSuccessUrl("");
     try {
       const body: Record<string, any> = { name: newName || "Torrent", description: newDesc };
@@ -624,7 +589,7 @@ export default function Home() {
         body.infoHash = seedingInfo.infoHash;
         body.size = seedingInfo.size;
         body.fileCount = seedingInfo.fileCount;
-        body.magnetOnly = !seedingInfo.infoHash || seedingInfo.infoHash === "pending";
+        body.magnetOnly = false;
       }
 
       const res = await fetch("/api/torrents", {
@@ -672,20 +637,52 @@ export default function Home() {
   const handleFileSelect = async (files: FileList | null) => {
     if (!files) return;
     const fileArray = Array.from(files);
+    setError("");
     setUploadedFiles(fileArray);
-    setIsSeeding(true);
+    setMode("torrent");
     const torrentFiles = fileArray.filter((f) => f.name.endsWith(".torrent"));
-    if (torrentFiles.length > 0) {
-      const info = await parseTorrentFile(torrentFiles[0]);
-      if (info) {
-        setSeedingInfo({ infoHash: info.infoHash, name: info.name, magnetUri: info.magnetUri, size: info.size, fileCount: info.fileCount });
-        setNewName(info.name);
-      }
-    } else {
-      setSeedingInfo({ infoHash: "pending", name: fileArray[0]?.name || "Torrent", magnetUri: "", size: 0, fileCount: 0 });
-      setNewName(fileArray[0]?.name?.replace(/\.[^.]+$/, "") || "Torrent");
+    if (torrentFiles.length === 0) {
+      setError("Only .torrent files are supported");
+      setUploadedFiles([]);
+      return;
     }
-    setMode("upload");
+    setIsSeeding(true);
+    setSeedingInfo(null);
+    const info = await parseTorrentFile(torrentFiles[0]);
+    if (info) {
+      setSeedingInfo({ infoHash: info.infoHash, name: info.name, magnetUri: info.magnetUri, size: info.size, fileCount: info.fileCount });
+      setNewName(info.name);
+      setIsSeeding(false);
+    } else {
+      setError("Could not parse torrent file");
+      setUploadedFiles([]);
+      setIsSeeding(false);
+    }
+  };
+
+  const fileInputRef2 = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const handleWebTorrentUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setError("");
+    setUploading(true);
+    try {
+      const file = files[0];
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("name", file.name.replace(/\.[^.]+$/, ""));
+      const res = await fetch("/api/torrents/upload", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const data: any = await res.json();
+      if (!res.ok) { setError(data.error || "Upload failed"); return; }
+      setSuccessUrl(data.shortUrl);
+      setNewName(""); setNewDesc(""); setUploadedFiles([]);
+      setTorrents((prev) => [data, ...prev]);
+    } catch { setError("Upload failed"); }
+    finally { setUploading(false); }
   };
 
   const [showAuth, setShowAuth] = useState(false);
@@ -801,6 +798,74 @@ export default function Home() {
           </div>
         </section>
 
+        {/* Torrent Detail View */}
+        {torrentView && (
+          <section className="max-w-2xl mx-auto px-4 pb-24">
+            <div className="bg-card border border-border rounded-2xl p-8">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold">{torrentView.name}</h2>
+                  {torrentView.description && <p className="text-muted mt-2">{torrentView.description}</p>}
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  {torrentView.torrentFileUrl && <a href={torrentView.torrentFileUrl} className="px-4 py-2 rounded-lg bg-secondary text-sm font-medium hover:bg-card-hover transition-colors">📥 .torrent</a>}
+                  <a href={torrentView.magnetUri} className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors">🧲 Magnet</a>
+                </div>
+              </div>
+              <div className="mt-6 grid grid-cols-2 gap-4 text-sm">
+                {torrentView.actorUsername && (
+                  <div>
+                    <span className="text-muted">Posted by</span>
+                    <p className="font-medium">{torrentView.actorUsername}{torrentView.actorDomain ? `@${torrentView.actorDomain}` : ""}</p>
+                  </div>
+                )}
+                {torrentView.infoHash && (
+                  <div>
+                    <span className="text-muted">Info Hash</span>
+                    <p className="font-mono text-xs break-all">{torrentView.infoHash}</p>
+                  </div>
+                )}
+                {torrentView.size > 0 && (
+                  <div>
+                    <span className="text-muted">Size</span>
+                    <p className="font-medium">{formatSize(torrentView.size, d)}</p>
+                  </div>
+                )}
+                {torrentView.fileCount > 0 && (
+                  <div>
+                    <span className="text-muted">Files</span>
+                    <p className="font-medium">{torrentView.fileCount}</p>
+                  </div>
+                )}
+                <div>
+                  <span className="text-muted">Published</span>
+                  <p className="font-medium">{formatDate(torrentView.published, locale)}</p>
+                </div>
+              </div>
+              {!torrentView.magnetOnly && torrentView.fileUrl && (
+                <div className="mt-4 p-3 rounded-lg bg-primary/10 border border-primary/20">
+                  <p className="text-sm text-primary font-medium">Direct Download</p>
+                  <a href={torrentView.fileUrl} className="text-sm font-mono break-all text-primary hover:underline">{torrentView.fileUrl}</a>
+                </div>
+              )}
+              <details className="mt-4 text-sm">
+                <summary className="cursor-pointer text-muted hover:text-foreground">Download commands</summary>
+                <pre className="mt-2 p-3 rounded-lg bg-secondary text-xs font-mono overflow-x-auto text-muted leading-relaxed">
+# aria2 (recommended)
+aria2c "{torrentView.torrentFileUrl || torrentView.fileUrl}"
+
+# curl
+curl -L -o "{torrentView.name}" "{torrentView.fileUrl}"
+
+# wget
+wget "{torrentView.fileUrl}"
+                </pre>
+              </details>
+              <button onClick={() => { setTorrentView(null); window.history.replaceState({}, "", "/"); }} className="mt-6 text-sm text-muted hover:text-foreground transition-colors">Close</button>
+            </div>
+          </section>
+        )}
+
         {/* Create Torrent Section */}
         {token && (
           <section id="create" className="max-w-2xl mx-auto px-4 pb-24">
@@ -820,7 +885,7 @@ export default function Home() {
                   <div className="flex gap-3">
                     <button onClick={() => { navigator.clipboard.writeText(successUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
                       className="flex-1 py-2.5 rounded-xl bg-primary text-white font-medium hover:bg-primary-hover transition-colors">{copied ? d.copied : d.copy}</button>
-                    <button onClick={() => { setSuccessUrl(""); setNewName(""); setNewMagnet(""); setNewDesc(""); setUploadedFiles([]); setSeedingInfo(null); setIsSeeding(false); }}
+                    <button onClick={() => { setSuccessUrl(""); setNewName(""); setNewMagnet(""); setNewDesc(""); setUploadedFiles([]); setSeedingInfo(null); setIsSeeding(false); setMode("magnet"); }}
                       className="flex-1 py-2.5 rounded-xl border border-border text-foreground font-medium hover:bg-card-hover transition-colors">{d.shareAnother}</button>
                   </div>
                 </div>
@@ -829,7 +894,8 @@ export default function Home() {
                   {/* Mode Toggle */}
                   <div className="flex gap-2 mb-2">
                     <button onClick={() => setMode("magnet")} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${mode === "magnet" ? "bg-primary text-white" : "bg-secondary text-muted hover:text-foreground"}`}>🧲 {d.magnetLink}</button>
-                    <button onClick={() => setMode("upload")} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${mode === "upload" ? "bg-primary text-white" : "bg-secondary text-muted hover:text-foreground"}`}>📤 {d.dragDrop}</button>
+                    <button onClick={() => { setMode("torrent"); setUploadedFiles([]); setSeedingInfo(null); setError(""); }} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${mode === "torrent" ? "bg-primary text-white" : "bg-secondary text-muted hover:text-foreground"}`}>📄 Torrent</button>
+                    <button onClick={() => { setMode("webtorrent"); setError(""); }} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${mode === "webtorrent" ? "bg-primary text-white" : "bg-secondary text-muted hover:text-foreground"}`}>📤 {d.dragDrop}</button>
                   </div>
 
                   <div>
@@ -843,9 +909,9 @@ export default function Home() {
                       <input value={newMagnet} onChange={(e) => setNewMagnet(e.target.value)} placeholder={d.magnetPlaceholder} className="w-full px-4 py-2.5 rounded-xl bg-secondary border border-border focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors font-mono text-sm" />
                       <p className="text-xs text-muted mt-1">{d.magnetHelp}</p>
                     </div>
-                  ) : (
+                  ) : mode === "torrent" ? (
                     <div>
-                      <label className="text-sm text-muted mb-1.5 block">{d.dragDrop}</label>
+                      <label className="text-sm text-muted mb-1.5 block">Torrent file</label>
                       <div className="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-primary/50 transition-colors cursor-pointer"
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={(e) => { e.preventDefault(); handleFileSelect(e.dataTransfer.files); }}
@@ -857,22 +923,32 @@ export default function Home() {
                           </div>
                         ) : (
                           <>
-                            <p className="text-muted mb-3">{d.dragDropDesc}</p>
+                            <p className="text-muted mb-3">Drop a .torrent file or click to select</p>
                             <div className="flex items-center justify-center gap-3">
-                              <button onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }} className="px-4 py-2 rounded-lg bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition-colors">{d.selectFiles}</button>
-                              <button onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }} className="px-4 py-2 rounded-lg bg-secondary text-muted text-sm font-medium hover:text-foreground transition-colors">{d.selectFolder}</button>
+                              <button onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }} className="px-4 py-2 rounded-lg bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition-colors">Select .torrent file</button>
                             </div>
                           </>
                         )}
                       </div>
-                      <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={(e) => handleFileSelect(e.target.files)} />
-                      <input ref={folderInputRef} type="file" {...{ webkitdirectory: "" } as any} multiple style={{ display: "none" }} onChange={(e) => handleFileSelect(e.target.files)} />
-                      {isSeeding && seedingInfo && (
+                      <input ref={fileInputRef} type="file" accept=".torrent" style={{ display: "none" }} onChange={(e) => handleFileSelect(e.target.files)} />
+                      {seedingInfo && (
                         <div className="mt-3 p-3 rounded-lg bg-primary/10 border border-primary/20">
                           <p className="text-sm text-primary font-medium">{d.seeding}: {seedingInfo.name}</p>
                           <p className="text-xs text-muted font-mono mt-1">{seedingInfo.infoHash.slice(0, 20)}...</p>
                         </div>
                       )}
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="text-sm text-muted mb-1.5 block">Upload files</label>
+                      <div className="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-primary/50 transition-colors cursor-pointer"
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => { e.preventDefault(); handleWebTorrentUpload(e.dataTransfer.files); }}
+                        onClick={() => fileInputRef2.current?.click()}>
+                        <p className="text-muted mb-3">Drop files to upload to the instance</p>
+                        <button onClick={(e) => { e.stopPropagation(); fileInputRef2.current?.click(); }} className="px-4 py-2 rounded-lg bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition-colors">Select files</button>
+                      </div>
+                      <input ref={fileInputRef2} type="file" multiple style={{ display: "none" }} onChange={(e) => handleWebTorrentUpload(e.target.files)} />
                     </div>
                   )}
 
@@ -882,10 +958,14 @@ export default function Home() {
                   </div>
 
                   {error && <p className="text-error text-sm">{error}</p>}
-                  <button onClick={handleCreate} disabled={creating || (mode === "magnet" && !newMagnet) || (mode === "upload" && uploadedFiles.length === 0)}
-                    className="w-full py-2.5 rounded-xl bg-primary text-white font-medium hover:bg-primary-hover transition-colors disabled:opacity-50">
-                    {creating ? "..." : d.submit}
-                  </button>
+                  {mode === "webtorrent" ? (
+                    <p className="text-xs text-muted">Files are uploaded and stored on the instance. Generates a magnet link for WebTorrent sharing.</p>
+                  ) : (
+                    <button onClick={handleCreate} disabled={creating || isSeeding || (mode === "magnet" && !newMagnet) || (mode === "torrent" && (!seedingInfo || !seedingInfo.magnetUri))}
+                      className="w-full py-2.5 rounded-xl bg-primary text-white font-medium hover:bg-primary-hover transition-colors disabled:opacity-50">
+                      {creating ? "..." : isSeeding ? "Parsing..." : d.submit}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -958,6 +1038,7 @@ export default function Home() {
                   { title: d.feature1, desc: d.feature1Desc, icon: "🔄" },
                   { title: d.feature2, desc: d.feature2Desc, icon: "🧲" },
                   { title: d.feature3, desc: d.feature3Desc, icon: "📖" },
+                  { title: d.feature4, desc: d.feature4Desc, icon: "⬇️" },
                 ].map((feat) => (
                   <div key={feat.title} className="bg-card border border-border rounded-2xl p-8 hover:border-primary/30 transition-colors">
                     <span className="text-3xl">{feat.icon}</span>

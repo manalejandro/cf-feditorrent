@@ -90,6 +90,22 @@ export async function POST(request: NextRequest) {
       objectId: noteId,
     });
 
+    // Authorize in tracker KV if info hash is provided
+    if (mInfoHash) {
+      const MAX_TORRENTS = parseInt(env.MAX_TORRENTS || "100");
+      const EXPIRY_MINUTES = parseInt(env.TORRENT_EXPIRY_MINUTES || "30");
+      const SECRET_KEY = env.SECRET_KEY || "default-insecure-key";
+      const list = await env.TORRENTS_KV.list();
+      if (list.keys.length < MAX_TORRENTS) {
+        const timestamp = Date.now();
+        const data = `${mInfoHash}-${timestamp}`;
+        const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(SECRET_KEY), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+        const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data));
+        const token = Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
+        await env.TORRENTS_KV.put(mInfoHash, JSON.stringify({ token, timestamp, infoHash: mInfoHash }), { expirationTtl: EXPIRY_MINUTES * 60 });
+      }
+    }
+
     const createId = generateId();
     const apCreateActivity = buildCreate(baseUrl, session.id, note, createId);
 

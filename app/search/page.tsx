@@ -20,19 +20,40 @@ export default function SearchPage() {
   const [results, setResults] = useState<ActorResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [following, setFollowing] = useState<Record<string, boolean>>({});
+  const [followLoading, setFollowLoading] = useState<Record<string, boolean>>({});
   const [locale, setLocale, d] = useLocale();
+
+  const checkFollowState = async (actorId: string, token: string) => {
+    try {
+      const res = await fetch(`/api/follow?targetId=${encodeURIComponent(actorId)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data: any = await res.json();
+      if (data.following) {
+        setFollowing((prev) => ({ ...prev, [actorId]: true }));
+      }
+    } catch { /* ignore */ }
+  };
 
   const search = async () => {
     if (!query.trim()) return;
     setLoading(true);
     setSearched(true);
+    setFollowing({});
     try {
       const token = localStorage.getItem("ft_token");
       const res = await fetch(`/api/v1/accounts/search?q=${encodeURIComponent(query)}&limit=20`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       const data = await res.json();
-      setResults(Array.isArray(data) ? data : []);
+      const actors = Array.isArray(data) ? data : [];
+      setResults(actors);
+      if (token) {
+        for (const actor of actors) {
+          checkFollowState(actor.id, token);
+        }
+      }
     } catch { setResults([]); }
     finally { setLoading(false); }
   };
@@ -40,13 +61,36 @@ export default function SearchPage() {
   const handleFollow = async (targetId: string) => {
     const token = localStorage.getItem("ft_token");
     if (!token) return;
+    setFollowLoading((prev) => ({ ...prev, [targetId]: true }));
     try {
-      await fetch("/api/follow", {
+      const res = await fetch("/api/follow", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ targetId }),
       });
+      const data: any = await res.json();
+      if (data.following === true || data.message === "Already following") {
+        setFollowing((prev) => ({ ...prev, [targetId]: true }));
+      }
     } catch { /* ignore */ }
+    finally { setFollowLoading((prev) => ({ ...prev, [targetId]: false })); }
+  };
+
+  const handleUnfollow = async (targetId: string) => {
+    const token = localStorage.getItem("ft_token");
+    if (!token) return;
+    setFollowLoading((prev) => ({ ...prev, [targetId]: true }));
+    try {
+      const res = await fetch("/api/unfollow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ targetId }),
+      });
+      if (res.ok) {
+        setFollowing((prev) => ({ ...prev, [targetId]: false }));
+      }
+    } catch { /* ignore */ }
+    finally { setFollowLoading((prev) => ({ ...prev, [targetId]: false })); }
   };
 
   return (
@@ -91,28 +135,40 @@ export default function SearchPage() {
         )}
 
         <div className="space-y-3">
-          {results.map((actor) => (
-            <div key={actor.id} className="bg-card border border-border rounded-xl p-4 hover:bg-card-hover transition-colors">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-sm font-bold text-primary shrink-0">
-                    {(actor.displayName || actor.username)[0].toUpperCase()}
+          {results.map((actor) => {
+            const isFollowing = following[actor.id] ?? false;
+            const isLoading = followLoading[actor.id] ?? false;
+            return (
+              <div key={actor.id} className="bg-card border border-border rounded-xl p-4 hover:bg-card-hover transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-sm font-bold text-primary shrink-0">
+                      {(actor.displayName || actor.username)[0].toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="font-medium">{actor.displayName || actor.username}</p>
+                      <p className="text-sm text-muted">@{actor.username}@{actor.domain}</p>
+                      <p className="text-xs text-muted mt-0.5">
+                        {actor.torrentsCount} {locale === "es" ? "torrents" : "torrents"} · {actor.followersCount} {d.profile.followers.toLowerCase()}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-medium">{actor.displayName || actor.username}</p>
-                    <p className="text-sm text-muted">@{actor.username}@{actor.domain}</p>
-                    <p className="text-xs text-muted mt-0.5">
-                      {actor.torrentsCount} {locale === "es" ? "torrents" : "torrents"} · {actor.followersCount} {d.profile.followers.toLowerCase()}
-                    </p>
-                  </div>
+                  <button
+                    onClick={() => isFollowing ? handleUnfollow(actor.id) : handleFollow(actor.id)}
+                    disabled={isLoading}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
+                      isFollowing
+                        ? "bg-secondary text-muted border border-border"
+                        : "bg-primary text-white hover:bg-primary-hover"
+                    }`}>
+                    {isLoading ? "..." : isFollowing
+                      ? (locale === "es" ? "Siguiendo" : "Following")
+                      : (locale === "es" ? "Seguir" : "Follow")}
+                  </button>
                 </div>
-                <button onClick={() => handleFollow(actor.id)}
-                  className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors">
-                  {locale === "es" ? "Seguir" : "Follow"}
-                </button>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </main>
 

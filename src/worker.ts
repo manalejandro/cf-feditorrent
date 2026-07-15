@@ -1,4 +1,4 @@
-import { signRequest } from "../lib/activitypub/security";
+import { signRequest } from "@/lib/activitypub/security";
 export { TrackerDO } from "./tracker-do";
 
 const AP_CONTENT_TYPE = "application/activity+json";

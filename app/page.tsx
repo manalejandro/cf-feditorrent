@@ -2,6 +2,76 @@
 
 import { useState, useEffect, useRef } from "react";
 
+// Minimal bencode parser + encoder for .torrent files
+function bencodeParse(data: Uint8Array, offset = 0): { val: any; end: number } {
+  const b = data[offset];
+  if (b === 0x69) { // i
+    let end = offset + 1;
+    while (data[end] !== 0x65) end++;
+    return { val: parseInt(new TextDecoder().decode(data.slice(offset + 1, end))), end: end + 1 };
+  }
+  if (b >= 0x30 && b <= 0x39) { // string
+    let colon = offset;
+    while (data[colon] !== 0x3a) colon++;
+    const len = parseInt(new TextDecoder().decode(data.slice(offset, colon)));
+    const start = colon + 1;
+    return { val: new TextDecoder().decode(data.slice(start, start + len)), end: start + len };
+  }
+  if (b === 0x6c) { // l
+    let pos = offset + 1; const arr: any[] = [];
+    while (data[pos] !== 0x65) { const r = bencodeParse(data, pos); arr.push(r.val); pos = r.end; }
+    return { val: arr, end: pos + 1 };
+  }
+  if (b === 0x64) { // d
+    let pos = offset + 1; const dict: Record<string, any> = {};
+    while (data[pos] !== 0x65) {
+      const k = bencodeParse(data, pos); const v = bencodeParse(data, k.end);
+      dict[k.val as string] = v.val; pos = v.end;
+    }
+    return { val: dict, end: pos + 1 };
+  }
+  throw new Error("Invalid bencode at " + offset);
+}
+
+function bencodeEncode(val: any): Uint8Array {
+  const enc = new TextEncoder();
+  if (typeof val === "number") return enc.encode("i" + val + "e");
+  if (typeof val === "string") return enc.encode(val.length + ":" + val);
+  if (Array.isArray(val)) return enc.encode("l" + val.map((v) => new TextDecoder().decode(bencodeEncode(v))).join("") + "e");
+  if (typeof val === "object" && val !== null) {
+    const keys = Object.keys(val).sort();
+    return enc.encode("d" + keys.map((k) => new TextDecoder().decode(bencodeEncode(k)) + new TextDecoder().decode(bencodeEncode(val[k]))).join("") + "e");
+  }
+  throw new Error("Cannot encode: " + typeof val);
+}
+
+async function sha1Hex(data: Uint8Array): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-1", data as BufferSource);
+  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function parseTorrentFile(file: File): Promise<{ infoHash: string; name: string; magnetUri: string; size: number; fileCount: number } | null> {
+  try {
+    const buf = await file.arrayBuffer();
+    const raw = new Uint8Array(buf);
+    const parsed = bencodeParse(raw);
+    const info = parsed.val.info;
+    if (!info || typeof info !== "object") return null;
+    const rawInfo = bencodeEncode(info);
+    const infoHash = await sha1Hex(rawInfo);
+    const name = info.name || "Torrent";
+    let size = 0; let fileCount = 0;
+    if (info.files && Array.isArray(info.files)) {
+      fileCount = info.files.length;
+      for (const f of info.files) size += f.length || 0;
+    } else {
+      fileCount = 1; size = info.length || 0;
+    }
+    const magnetUri = `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(name)}`;
+    return { infoHash, name, magnetUri, size, fileCount };
+  } catch { return null; }
+}
+
 declare global {
   interface Window {
     turnstile: {
@@ -507,7 +577,7 @@ export default function Home() {
   const folderInputRef = useRef<HTMLInputElement>(null);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isSeeding, setIsSeeding] = useState(false);
-  const [seedingInfo, setSeedingInfo] = useState<{ infoHash: string; name: string } | null>(null);
+  const [seedingInfo, setSeedingInfo] = useState<{ infoHash: string; name: string; magnetUri: string; size: number; fileCount: number } | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -550,9 +620,11 @@ export default function Home() {
         body.size = 0;
         body.fileCount = 0;
       } else if (seedingInfo) {
-        body.magnetUri = `magnet:?xt=urn:btih:${seedingInfo.infoHash}&dn=${encodeURIComponent(seedingInfo.name)}`;
+        body.magnetUri = seedingInfo.magnetUri;
         body.infoHash = seedingInfo.infoHash;
-        body.magnetOnly = false;
+        body.size = seedingInfo.size;
+        body.fileCount = seedingInfo.fileCount;
+        body.magnetOnly = !seedingInfo.infoHash || seedingInfo.infoHash === "pending";
       }
 
       const res = await fetch("/api/torrents", {
@@ -597,10 +669,22 @@ export default function Home() {
     finally { setResetting(false); }
   };
 
-  const handleFileSelect = (files: FileList | null) => {
+  const handleFileSelect = async (files: FileList | null) => {
     if (!files) return;
     const fileArray = Array.from(files);
     setUploadedFiles(fileArray);
+    setIsSeeding(true);
+    const torrentFiles = fileArray.filter((f) => f.name.endsWith(".torrent"));
+    if (torrentFiles.length > 0) {
+      const info = await parseTorrentFile(torrentFiles[0]);
+      if (info) {
+        setSeedingInfo({ infoHash: info.infoHash, name: info.name, magnetUri: info.magnetUri, size: info.size, fileCount: info.fileCount });
+        setNewName(info.name);
+      }
+    } else {
+      setSeedingInfo({ infoHash: "pending", name: fileArray[0]?.name || "Torrent", magnetUri: "", size: 0, fileCount: 0 });
+      setNewName(fileArray[0]?.name?.replace(/\.[^.]+$/, "") || "Torrent");
+    }
     setMode("upload");
   };
 

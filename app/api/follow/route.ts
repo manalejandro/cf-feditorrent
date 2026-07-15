@@ -6,6 +6,20 @@ import { getActorById, getFollow, createFollow, createActivity, getFollowerIds, 
 import { deliverToInbox } from "@/lib/activitypub/federation";
 import { fetchRemoteObject } from "@/lib/activitypub/federation";
 
+export async function GET(request: NextRequest) {
+  const { env } = getCloudflareContext();
+  const auth = request.headers.get("authorization")?.replace("Bearer ", "");
+  if (!auth) return unauthorized();
+  const session = await getSessionActor(env.DB, auth);
+  if (!session) return unauthorized();
+
+  const targetId = request.nextUrl.searchParams.get("targetId");
+  if (!targetId) return json({ following: false });
+
+  const follow = await getFollow(env.DB, session.id, targetId);
+  return json({ following: follow?.state === "accepted" });
+}
+
 export async function POST(request: NextRequest) {
   const { env } = getCloudflareContext();
   const auth = request.headers.get("authorization")?.replace("Bearer ", "");

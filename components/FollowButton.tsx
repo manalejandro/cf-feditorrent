@@ -5,11 +5,24 @@ import { useState, useEffect } from "react";
 export function FollowButton({ targetId, targetUsername }: { targetId: string; targetUsername: string }) {
   const [following, setFollowing] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
     const username = localStorage.getItem("ft_username");
-    if (username === targetUsername) setFollowing(false);
-  }, [targetUsername]);
+    if (username === targetUsername) {
+      setChecking(false);
+      return;
+    }
+    const token = localStorage.getItem("ft_token");
+    if (!token) { setChecking(false); return; }
+    fetch(`/api/follow?targetId=${encodeURIComponent(targetId)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => r.json())
+      .then((data: any) => setFollowing(data.following))
+      .catch(() => {})
+      .finally(() => setChecking(false));
+  }, [targetId, targetUsername]);
 
   const toggle = async () => {
     setLoading(true);
@@ -28,7 +41,7 @@ export function FollowButton({ targetId, targetUsername }: { targetId: string; t
   };
 
   const username = typeof window !== "undefined" ? localStorage.getItem("ft_username") : null;
-  if (username === targetUsername) return null;
+  if (username === targetUsername || checking) return null;
 
   return (
     <button

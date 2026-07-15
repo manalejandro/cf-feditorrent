@@ -9,6 +9,7 @@ export type Dict = {
   auth: { username: string; email: string; password: string; confirmPassword: string; loginTitle: string; registerTitle: string; loginBtn: string; registerBtn: string; noAccount: string; haveAccount: string; usernamePlaceholder: string; emailPlaceholder: string; passwordPlaceholder: string; loggingIn: string; registering: string; loginError: string; registerError: string; forgotPassword: string; forgotPasswordTitle: string; forgotPasswordDesc: string; forgotPasswordBtn: string; forgotPasswordSent: string; forgotPasswordEmailSent: string; resetPasswordTitle: string; resetPasswordBtn: string; resetPasswordSuccess: string; newPassword: string; confirmNewPassword: string; resendVerification: string; resendVerificationSent: string; emailVerified: string; emailVerificationFailed: string; checkEmail: string; turnstileError: string };
   profile: { title: string; torrents: string; followers: string; following: string; editProfile: string; displayName: string; bio: string; save: string; saved: string };
   footer: { poweredBy: string; source: string; language: string };
+  sizeUnits: { bytes: string; kb: string; mb: string; gb: string; tb: string };
   errors: { notFound: string; serverError: string; unauthorised: string };
 };
 
@@ -58,6 +59,7 @@ export const dicts: Record<Locale, Dict> = {
     },
     profile: { title: "Profile", torrents: "Torrents", followers: "Followers", following: "Following", editProfile: "Edit Profile", displayName: "Display Name", bio: "Bio", save: "Save", saved: "Saved!" },
     footer: { poweredBy: "Powered by Next.js, Cloudflare & ActivityPub", source: "Source Code", language: "Language" },
+    sizeUnits: { bytes: "B", kb: "KB", mb: "MB", gb: "GB", tb: "TB" },
     errors: { notFound: "Page not found", serverError: "Server error", unauthorised: "Unauthorised" },
   },
   es: {
@@ -105,6 +107,7 @@ export const dicts: Record<Locale, Dict> = {
     },
     profile: { title: "Perfil", torrents: "Torrents", followers: "Seguidores", following: "Siguiendo", editProfile: "Editar Perfil", displayName: "Nombre", bio: "Biografía", save: "Guardar", saved: "¡Guardado!" },
     footer: { poweredBy: "Desarrollado con Next.js, Cloudflare y ActivityPub", source: "Código Fuente", language: "Idioma" },
+    sizeUnits: { bytes: "B", kb: "KB", mb: "MB", gb: "GB", tb: "TB" },
     errors: { notFound: "Página no encontrada", serverError: "Error del servidor", unauthorised: "No autorizado" },
   },
 };

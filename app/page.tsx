@@ -292,7 +292,12 @@ function formatDate(dateStr: string, locale: Locale): string {
 
 function Toggle({ locale, setLocale }: { locale: Locale; setLocale: (l: Locale) => void }) {
   return (
-    <button onClick={() => setLocale(locale === "en" ? "es" : "en")}
+    <button onClick={() => {
+      const next = locale === "en" ? "es" : "en";
+      localStorage.setItem("ft_locale", next);
+      document.cookie = `ft_locale=${next};path=/;max-age=31536000;SameSite=Lax`;
+      setLocale(next);
+    }}
       className="px-3 py-1.5 rounded-lg bg-card border border-border text-sm font-medium text-muted hover:text-foreground transition-colors">
       {locale === "en" ? "ES" : "EN"}
     </button>
@@ -508,13 +513,15 @@ function AuthModal({ d, showAuth, setShowAuth, showRegister, setShowRegister, on
 
 export default function Home() {
   const [locale, setLocale] = useState<Locale>("en");
+  const [unreadCount, setUnreadCount] = useState(0);
   const [ctaKey, setCtaKey] = useState(0);
   const [torrents, setTorrents] = useState<Torrent[]>([]);
   const [newName, setNewName] = useState("");
   const [newMagnet, setNewMagnet] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [successUrl, setSuccessUrl] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedUrl, setCopiedUrl] = useState(false);
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -566,9 +573,16 @@ export default function Home() {
   const username = typeof window !== "undefined" ? localStorage.getItem("ft_username") : null;
 
   useEffect(() => {
+    const savedLocale = localStorage.getItem("ft_locale") as Locale | null;
+    if (savedLocale === "en" || savedLocale === "es") setLocale(savedLocale);
+  }, []);
+
+  useEffect(() => {
     if (token) {
       fetch("/api/torrents", { headers: { Authorization: `Bearer ${token}` } })
         .then((r) => r.json()).then((data) => { if (Array.isArray(data)) setTorrents(data); }).catch(() => {});
+      fetch("/api/notifications/count", { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => r.json()).then((data) => setUnreadCount((data as any).count ?? 0)).catch(() => {});
     }
   }, [token]);
 
@@ -705,7 +719,13 @@ export default function Home() {
             {token ? (
               <>
                 <a href="/search" className="text-sm text-muted hover:text-foreground transition-colors">{d.search}</a>
-                <a href="/notifications" className="text-sm text-muted hover:text-foreground transition-colors relative">{d.notifications}</a>
+                <a href="/notifications" className="text-sm text-muted hover:text-foreground transition-colors relative">{d.notifications}
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-1.5 -right-3 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-error text-[10px] font-bold text-white px-1">
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </span>
+                  )}
+                </a>
                 <a href={`/users/${username}`} className="text-sm text-muted hover:text-foreground transition-colors">{username}</a>
                 <a href="/links" className="px-4 py-2 rounded-lg bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition-colors">{d.myTorrents}</a>
                 <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="text-sm text-muted hover:text-error transition-colors">{d.logout}</button>
@@ -883,8 +903,8 @@ wget "{torrentView.fileUrl}"
                     </div>
                   </div>
                   <div className="flex gap-3">
-                    <button onClick={() => { navigator.clipboard.writeText(successUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
-                      className="flex-1 py-2.5 rounded-xl bg-primary text-white font-medium hover:bg-primary-hover transition-colors">{copied ? d.copied : d.copy}</button>
+                    <button onClick={() => { navigator.clipboard.writeText(successUrl); setCopiedUrl(true); setTimeout(() => setCopiedUrl(false), 2000); }}
+                      className="flex-1 py-2.5 rounded-xl bg-primary text-white font-medium hover:bg-primary-hover transition-colors">{copiedUrl ? d.copied : d.copy}</button>
                     <button onClick={() => { setSuccessUrl(""); setNewName(""); setNewMagnet(""); setNewDesc(""); setUploadedFiles([]); setSeedingInfo(null); setIsSeeding(false); setMode("magnet"); }}
                       className="flex-1 py-2.5 rounded-xl border border-border text-foreground font-medium hover:bg-card-hover transition-colors">{d.shareAnother}</button>
                   </div>
@@ -971,9 +991,13 @@ wget "{torrentView.fileUrl}"
             </div>
 
             {/* Torrents List */}
-            {torrents.length > 0 && (
-              <div className="mt-12">
-                <h3 className="text-xl font-bold mb-4">{d.yourTorrents}</h3>
+            <div className="mt-12">
+              <h3 className="text-xl font-bold mb-4">{d.yourTorrents}</h3>
+              {torrents.length === 0 ? (
+                <div className="bg-card border border-border rounded-xl p-8 text-center">
+                  <p className="text-muted">{d.noTorrents}</p>
+                </div>
+              ) : (
                 <div className="space-y-3">
                   {torrents.map((torrent) => (
                     <div key={torrent.id} className="bg-card border border-border rounded-xl p-4 hover:bg-card-hover transition-colors">
@@ -988,7 +1012,7 @@ wget "{torrentView.fileUrl}"
                           <div className="flex items-center gap-3 mt-2 text-xs text-muted">
                             {torrent.size > 0 && <span>{formatSize(torrent.size, d)}</span>}
                             {torrent.fileCount > 0 && <span>{torrent.fileCount} {d.files}</span>}
-                            <span>{torrent.clicks} {d.clicks}</span>
+                            <span>{torrent.clicks > 0 ? `${torrent.clicks} ${d.clicks}` : `0 ${d.clicks}`}</span>
                             <span>{formatDate(torrent.published, locale)}</span>
                           </div>
                         </div>
@@ -996,15 +1020,15 @@ wget "{torrentView.fileUrl}"
                           <a href={torrent.magnetUri} className="px-3 py-1.5 rounded-lg bg-secondary text-sm text-muted hover:text-foreground transition-colors" title={d.magnetLink}>🧲</a>
                           <button onClick={() => handleDelete(torrent.id)} disabled={deleting === torrent.id}
                             className="px-3 py-1.5 rounded-lg bg-error/10 text-error text-sm hover:bg-error/20 transition-colors disabled:opacity-50">{deleting === torrent.id ? "..." : d.remove}</button>
-                          <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/torrents/${torrent.slug}`); }}
-                            className="px-3 py-1.5 rounded-lg bg-secondary text-sm text-muted hover:text-foreground transition-colors">{d.copy}</button>
+                          <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/torrents/${torrent.slug}`); setCopiedId(torrent.id); setTimeout(() => setCopiedId(null), 2000); }}
+                            className="px-3 py-1.5 rounded-lg bg-secondary text-sm text-muted hover:text-foreground transition-colors">{copiedId === torrent.id ? d.copied : d.copy}</button>
                         </div>
                       </div>
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </section>
         )}
 
@@ -1056,7 +1080,7 @@ wget "{torrentView.fileUrl}"
         <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
           <p className="text-sm text-muted">{d.poweredBy}</p>
           <div className="flex items-center gap-6">
-            <button onClick={() => setLocale(locale === "en" ? "es" : "en")} className="text-sm text-muted hover:text-foreground transition-colors">{d.language}: {locale === "en" ? "Español" : "English"}</button>
+            <button onClick={() => { const next = locale === "en" ? "es" : "en"; localStorage.setItem("ft_locale", next); document.cookie = `ft_locale=${next};path=/;max-age=31536000;SameSite=Lax`; setLocale(next); }} className="text-sm text-muted hover:text-foreground transition-colors">{d.language}: {locale === "en" ? "Español" : "English"}</button>
             <a href="https://github.com/manalejandro/cf-feditorrent" target="_blank" rel="noopener noreferrer" className="text-sm text-muted hover:text-foreground transition-colors">{d.source} ↗</a>
           </div>
         </div>

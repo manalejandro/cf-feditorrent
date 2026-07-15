@@ -36,7 +36,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(12px);background:rgba(10,10,15,.8);border-bottom:1px solid #27272a}
 .nav-inner{max-width:1200px;margin:0 auto;padding:0 1rem;height:64px;display:flex;align-items:center;justify-content:space-between}
 .logo{display:flex;align-items:center;gap:10px;text-decoration:none;color:#e4e4e7}
-.logo-icon{width:32px;height:32px;border-radius:8px;background:#6366f1;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px}
+.logo-icon{width:32px;height:32px;border-radius:8px;background:#8b5cf6;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px}
 .logo-text{font-weight:600;font-size:18px}
 main{flex:1;max-width:720px;margin:0 auto;padding:2rem 1rem;width:100%}
 .card{background:#18181b;border:1px solid #27272a;border-radius:16px;padding:2rem}
@@ -44,8 +44,8 @@ main{flex:1;max-width:720px;margin:0 auto;padding:2rem 1rem;width:100%}
 .header h1{font-size:1.5rem;font-weight:700;line-height:1.3}
 .actions{display:flex;gap:8px;flex-wrap:wrap}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:10px 16px;border-radius:8px;font-size:14px;font-weight:500;text-decoration:none;transition:all .2s;border:none;cursor:pointer}
-.btn-primary{background:#6366f1;color:#fff}
-.btn-primary:hover{background:#4f46e5}
+.btn-primary{background:#8b5cf6;color:#fff}
+.btn-primary:hover{background:#7c3aed}
 .btn-secondary{background:#27272a;color:#e4e4e7}
 .btn-secondary:hover{background:#3f3f46}
 .desc{margin-top:1rem;color:#a1a1aa;line-height:1.6}
@@ -54,9 +54,9 @@ main{flex:1;max-width:720px;margin:0 auto;padding:2rem 1rem;width:100%}
 .meta-label{font-size:12px;color:#71717a}
 .meta-value{font-size:14px;font-weight:500;margin-top:2px;word-break:break-all}
 .meta-value.code{font-family:'SF Mono',Monaco,monospace;font-size:12px}
-.download-box{margin-top:1.5rem;padding:1rem;border-radius:8px;background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.2)}
-.download-box p{font-size:14px;color:#818cf8;font-weight:500;margin-bottom:4px}
-.download-box a{font-size:13px;font-family:'SF Mono',Monaco,monospace;word-break:break-all;color:#6366f1;text-decoration:none}
+.download-box{margin-top:1.5rem;padding:1rem;border-radius:8px;background:rgba(139,92,246,.1);border:1px solid rgba(139,92,246,.2)}
+.download-box p{font-size:14px;color:#a78bfa;font-weight:500;margin-bottom:4px}
+.download-box a{font-size:13px;font-family:'SF Mono',Monaco,monospace;word-break:break-all;color:#8b5cf6;text-decoration:none}
 .download-box a:hover{text-decoration:underline}
 .back{margin-top:2rem;text-align:center}
 .back a{color:#71717a;font-size:14px;text-decoration:none}
@@ -66,7 +66,7 @@ main{flex:1;max-width:720px;margin:0 auto;padding:2rem 1rem;width:100%}
 .commands summary:hover{color:#e4e4e7}
 .commands pre{background:#18181b;border:1px solid #27272a;border-radius:8px;padding:12px;margin-top:8px;overflow-x:auto;font-size:12px;line-height:1.5}
 .commands code{color:#a1a1aa}
-.commands .hl{color:#818cf8}
+.commands .hl{color:#a78bfa}
 </style>
 </head>
 <body>

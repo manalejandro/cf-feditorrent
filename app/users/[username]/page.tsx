@@ -2,6 +2,16 @@ import { getCloudflareContext } from "@/lib/cf";
 import { getActorByUsername, getTorrentsByActor } from "@/lib/db";
 import { notFound } from "next/navigation";
 import { FollowButton } from "@/components/FollowButton";
+import { dicts, type Locale } from "@/lib/i18n/dict";
+import { cookies } from "next/headers";
+
+function formatSize(bytes: number, d: typeof dicts.en): string {
+  if (bytes === 0) return "0 " + d.sizeUnits.bytes;
+  const k = 1024;
+  const sizes = [d.sizeUnits.bytes, d.sizeUnits.kb, d.sizeUnits.mb, d.sizeUnits.gb, d.sizeUnits.tb];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+}
 
 export async function generateMetadata({ params }: { params: Promise<{ username: string }> }) {
   const { env } = getCloudflareContext();
@@ -23,6 +33,10 @@ export default async function UserProfile({ params }: { params: Promise<{ userna
   if (!actor || !actor.isLocal) return notFound();
 
   const torrents = await getTorrentsByActor(env.DB, actor.id);
+
+  const cookieStore = await cookies();
+  const locale = ((await cookieStore).get("ft_locale")?.value || "en") as Locale;
+  const d = dicts[locale];
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -47,9 +61,9 @@ export default async function UserProfile({ params }: { params: Promise<{ userna
               </div>
               {actor.summary && <p className="text-muted mt-2 text-sm whitespace-pre-wrap">{actor.summary}</p>}
               <div className="flex items-center gap-6 mt-4 text-sm text-muted">
-                <span><strong className="text-foreground">{torrents.length}</strong> torrents</span>
-                <span><strong className="text-foreground">{actor.followersCount}</strong> followers</span>
-                <span><strong className="text-foreground">{actor.followingCount}</strong> following</span>
+                <span><strong className="text-foreground">{torrents.length}</strong> {d.profile.torrents}</span>
+                <span><strong className="text-foreground">{actor.followersCount}</strong> {d.profile.followers}</span>
+                <span><strong className="text-foreground">{actor.followingCount}</strong> {d.profile.following}</span>
               </div>
               <div className="mt-4">
                 <FollowButton targetId={actor.id} targetUsername={actor.username} />
@@ -58,10 +72,10 @@ export default async function UserProfile({ params }: { params: Promise<{ userna
           </div>
         </div>
 
-        <h2 className="text-xl font-bold mb-4">Torrents</h2>
+        <h2 className="text-xl font-bold mb-4">{d.profile.torrents}</h2>
         {torrents.length === 0 ? (
           <div className="bg-card border border-border rounded-xl p-8 text-center">
-            <p className="text-muted">No torrents yet.</p>
+            <p className="text-muted">{d.torrent.noTorrents}</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -71,14 +85,14 @@ export default async function UserProfile({ params }: { params: Promise<{ userna
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <p className="font-medium truncate">{torrent.name}</p>
-                      {torrent.magnetOnly && <span className="text-xs px-2 py-0.5 rounded-full bg-secondary text-muted">Magnet Only</span>}
+                      {torrent.magnetOnly && <span className="text-xs px-2 py-0.5 rounded-full bg-secondary text-muted">{d.torrent.magnetOnly}</span>}
                     </div>
                     <p className="text-sm text-primary font-mono mt-1">{env.INSTANCE_URL}/torrents/{torrent.slug}</p>
                     {torrent.description && <p className="text-xs text-muted mt-1 truncate">{torrent.description}</p>}
                     <div className="flex items-center gap-3 mt-2 text-xs text-muted">
-                      {torrent.size > 0 && <span>{formatSize(torrent.size)}</span>}
-                      {torrent.fileCount > 0 && <span>{torrent.fileCount} files</span>}
-                      <span>{torrent.clicks} downloads</span>
+                      {torrent.size > 0 && <span>{formatSize(torrent.size, d)}</span>}
+                      {torrent.fileCount > 0 && <span>{torrent.fileCount} {d.torrent.files}</span>}
+                      <span>{torrent.clicks > 0 ? `${torrent.clicks} ${d.torrent.clicks}` : locale === "es" ? "Sin descargas" : "No downloads"}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -93,12 +107,4 @@ export default async function UserProfile({ params }: { params: Promise<{ userna
       </main>
     </div>
   );
-}
-
-function formatSize(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 }

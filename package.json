@@ -6,9 +6,17 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "preview": "next build && npx @opennextjs/cloudflare && wrangler dev",
+    "deploy": "next build && npx @opennextjs/cloudflare build && wrangler deploy",
+    "cf-typegen": "wrangler types",
+    "db:migrate": "wrangler d1 execute cf-feditorrent --remote --file=lib/db/schema.sql",
+    "db:drop": "wrangler d1 execute cf-feditorrent --remote --command='DROP TABLE IF EXISTS sessions; DROP TABLE IF EXISTS delivery_failures; DROP TABLE IF EXISTS notifications; DROP TABLE IF EXISTS activities; DROP TABLE IF EXISTS follows; DROP TABLE IF EXISTS objects; DROP TABLE IF EXISTS torrents; DROP TABLE IF EXISTS actors;'"
   },
   "dependencies": {
+    "@cloudflare/workers-types": "^5.20260711.1",
+    "@opennextjs/cloudflare": "^1.20.1",
+    "nanoid": "^5.1.16",
     "next": "16.2.10",
     "react": "19.2.4",
     "react-dom": "19.2.4"
@@ -21,6 +29,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.110.0"
   }
 }

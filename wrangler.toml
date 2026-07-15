@@ -1,0 +1,55 @@
+name = "cf-feditorrent"
+main = "src/worker.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+assets = { directory = ".open-next/assets", binding = "ASSETS" }
+
+[vars]
+INSTANCE_TITLE = "FediTorrent"
+INSTANCE_DESCRIPTION = "A federated torrent sharing platform powered by ActivityPub. Share files, torrents, and magnet links across the fediverse."
+INSTANCE_VERSION = "1.0.0"
+INSTANCE_URL = "https://feditorrent.com"
+NODE_ENV = "production"
+MAX_TORRENTS = "100"
+TORRENT_EXPIRY_MINUTES = "30"
+TURNSTILE_SITE_KEY = ""
+EMAIL_FROM = "noreply@feditorrent.com"
+EMAIL_FROM_NAME = "FediTorrent"
+
+[[send_email]]
+name = "EMAIL"
+
+[[routes]]
+pattern = "feditorrent.com"
+custom_domain = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cf-feditorrent"
+database_id = ""
+
+[[kv_namespaces]]
+binding = "TORRENTS_KV"
+id = ""
+
+[[queues.producers]]
+binding = "DELIVERY_QUEUE"
+queue = "cf-feditorrent-delivery"
+
+[[queues.consumers]]
+queue = "cf-feditorrent-delivery"
+max_batch_size = 20
+max_batch_timeout = 5
+max_retries = 3
+
+[[durable_objects.bindings]]
+name = "TRACKER"
+class_name = "TrackerDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TrackerDO"]
+
+[dev]
+port = 3000
+local_protocol = "http"

@@ -5,12 +5,52 @@ const AP_CONTENT_TYPE = "application/activity+json";
 const AP_ACCEPT = 'application/activity+json, application/ld+json; profile="https://www.w3.org/ns/activitystreams"';
 const REQUEST_TIMEOUT_MS = 10_000;
 
+const PRIVATE_IP_RANGES = [
+  /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,
+  /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,
+  /^192\.168\.\d{1,3}\.\d{1,3}$/,
+  /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/,
+  /^0\.0\.0\.0$/,
+  /^::1$/,
+  /^fc00:/i,
+  /^fe80:/i,
+];
+
+/**
+ * Validates that a URL is safe for outbound HTTP requests.
+ * Rejects non-HTTPS, private IPs, and localhost — defense-in-depth
+ * against SSRF via injected ActivityPub actor fields.
+ */
+export function validateOutboundUrl(url: string): { valid: boolean; reason?: string } {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") {
+      return { valid: false, reason: "Only HTTPS URLs are allowed" };
+    }
+    const hostname = parsed.hostname.toLowerCase();
+    if (hostname === "localhost" || hostname.endsWith(".localhost")) {
+      return { valid: false, reason: "Localhost is not allowed" };
+    }
+    if (PRIVATE_IP_RANGES.some((re) => re.test(hostname))) {
+      return { valid: false, reason: "Private IP ranges are not allowed" };
+    }
+    return { valid: true };
+  } catch {
+    return { valid: false, reason: "Invalid URL format" };
+  }
+}
+
 export async function deliverToInbox(
   inboxUrl: string,
   activity: APActivity,
   senderKeyId: string,
   privateKeyPem: string
 ): Promise<{ ok: boolean; status: number; error?: string }> {
+  const validation = validateOutboundUrl(inboxUrl);
+  if (!validation.valid) {
+    console.warn(`[federation] Blocked delivery to ${inboxUrl}: ${validation.reason}`);
+    return { ok: false, status: 0, error: validation.reason };
+  }
   const body = JSON.stringify(activity);
   const headers = await signRequest("POST", inboxUrl, body, privateKeyPem, senderKeyId);
   const controller = new AbortController();
@@ -45,6 +85,11 @@ export async function fetchRemoteObject(
   senderKeyId?: string,
   privateKeyPem?: string
 ): Promise<APActor | APObject | APActivity | null> {
+  const validation = validateOutboundUrl(url);
+  if (!validation.valid) {
+    console.warn(`[federation] Blocked fetch from ${url}: ${validation.reason}`);
+    return null;
+  }
   const additionalHeaders: Record<string, string> = {};
   if (senderKeyId && privateKeyPem) {
     const signed = await signRequest("GET", url, null, privateKeyPem, senderKeyId);

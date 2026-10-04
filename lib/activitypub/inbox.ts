@@ -1,17 +1,79 @@
+/**
+ * Inbox activity processor — handles incoming ActivityPub activities.
+ */
+
+import type { D1Database } from "@cloudflare/workers-types";
 import type { APActivity, APActor } from "@/lib/types";
-import { getActorById, createFollow, updateFollowState, deleteFollow, updateActorCounts, createNotification, getFollowByActivityId, getFollow } from "@/lib/db";
+import {
+  getActorById,
+  createFollow,
+  updateFollowState,
+  deleteFollow,
+  updateActorCounts,
+  createNotification,
+  getFollowByActivityId,
+  getFollow,
+} from "@/lib/db";
 import { buildAccept, generateId } from "./utils";
 import { deliverToInbox, fetchRemoteObject } from "./federation";
+import { cacheRemoteActor, type LocalSigningKey } from "./signer-key";
 
 interface InboxContext {
-  db: any;
+  db: D1Database;
   baseUrl: string;
   recipient?: { id: string; username: string; privateKeyPem: string } | null;
-  signingKey?: { id: string; privateKeyPem: string } | null;
+  /**
+   * The actor that signed the HTTP request (derived from the Signature keyId).
+   * Used to reject cross-actor spoofing — see processInboxActivity.
+   */
+  signingActorId?: string | null;
+  signingKey?: LocalSigningKey | null;
 }
 
 export async function processInboxActivity(activity: APActivity, ctx: InboxContext): Promise<void> {
-  const type = (activity.type ?? "").toLowerCase();
+  const rawType = activity.type as unknown;
+  const type = typeof rawType === "string"
+    ? rawType.toLowerCase()
+    : Array.isArray(rawType)
+      ? String(rawType[rawType.length - 1] ?? "").toLowerCase()
+      : "";
+
+  const activityActorId = typeof activity.actor === "string"
+    ? activity.actor
+    : (activity.actor as { id?: string } | undefined)?.id;
+
+  // Anti-spoofing: the HTTP-signature signer must own the activity's `actor`.
+  if (ctx.signingActorId && activityActorId && ctx.signingActorId !== activityActorId) {
+    return;
+  }
+
+  // Replay protection: record the activity id and skip duplicates. Most
+  // handlers are idempotent, but replayed Delete/Undo/Update activities can
+  // still corrupt counters or state.
+  const dedupActorId = activityActorId ?? ctx.signingActorId;
+  if (typeof activity.id === "string" && activity.id && dedupActorId) {
+    try {
+      const dedup = await ctx.db
+        .prepare(
+          `INSERT OR IGNORE INTO activities (id, type, actor_id, object_id, to_list, cc_list, raw, is_local, delivered)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1)`
+        )
+        .bind(
+          activity.id,
+          type || "unknown",
+          dedupActorId,
+          typeof activity.object === "string"
+            ? activity.object
+            : (activity.object as { id?: string } | undefined)?.id ?? null,
+          JSON.stringify(activity.to ?? []),
+          JSON.stringify(activity.cc ?? []),
+          JSON.stringify(activity)
+        )
+        .run();
+      if ((dedup.meta?.changes ?? 0) === 0) return;
+    } catch { /* dedup is best-effort — never block processing */ }
+  }
+
   try {
     switch (type) {
       case "follow": await handleFollow(activity, ctx); break;
@@ -36,7 +98,7 @@ async function handleFollow(activity: APActivity, ctx: InboxContext): Promise<vo
   const recipient = await getActorById(ctx.db, ctx.recipient.id);
   if (!recipient) return;
 
-  const followerActor = await ensureActorCached(ctx.db, actorId);
+  const followerActor = await ensureActorCached(ctx.db, actorId, ctx.signingKey);
   if (!followerActor) return;
 
   const existing = await getFollow(ctx.db, actorId, targetId);
@@ -81,24 +143,27 @@ async function handleAccept(activity: APActivity, ctx: InboxContext): Promise<vo
   if (!obj) return;
   const followActivityId = typeof obj === "string" ? obj : obj.id;
   const row = await getFollowByActivityId(ctx.db, followActivityId);
-  if (row && row.state === "pending") {
-    await updateFollowState(ctx.db, row.id, "accepted");
-    const follower = await getActorById(ctx.db, row.actorId);
-    if (follower?.isLocal) {
-      await updateActorCounts(ctx.db, row.actorId, { followingCount: (follower.followingCount ?? 0) + 1 });
-    }
-    const followed = await getActorById(ctx.db, row.targetId);
-    if (followed) {
-      await updateActorCounts(ctx.db, row.targetId, { followersCount: (followed.followersCount ?? 0) + 1 });
-    }
-    if (follower?.isLocal) {
-      await createNotification(ctx.db, {
-        id: generateId(),
-        type: "follow_accept",
-        accountId: row.targetId,
-        targetAccountId: row.actorId,
-      });
-    }
+  if (!row || row.state !== "pending") return;
+  // Only the followed actor may accept the follow.
+  const actorId = typeof activity.actor === "string" ? activity.actor : activity.actor.id;
+  if (actorId !== row.targetId) return;
+
+  await updateFollowState(ctx.db, row.id, "accepted");
+  const follower = await getActorById(ctx.db, row.actorId);
+  if (follower?.isLocal) {
+    await updateActorCounts(ctx.db, row.actorId, { followingCount: (follower.followingCount ?? 0) + 1 });
+  }
+  const followed = await getActorById(ctx.db, row.targetId);
+  if (followed) {
+    await updateActorCounts(ctx.db, row.targetId, { followersCount: (followed.followersCount ?? 0) + 1 });
+  }
+  if (follower?.isLocal) {
+    await createNotification(ctx.db, {
+      id: generateId(),
+      type: "follow_accept",
+      accountId: row.targetId,
+      targetAccountId: row.actorId,
+    });
   }
 }
 
@@ -107,17 +172,20 @@ async function handleReject(activity: APActivity, ctx: InboxContext): Promise<vo
   if (!obj) return;
   const followActivityId = typeof obj === "string" ? obj : obj.id;
   const row = await getFollowByActivityId(ctx.db, followActivityId);
-  if (row) {
-    await updateFollowState(ctx.db, row.id, "rejected");
-    const follower = await getActorById(ctx.db, row.actorId);
-    if (follower?.isLocal) {
-      await createNotification(ctx.db, {
-        id: generateId(),
-        type: "follow_reject",
-        accountId: row.targetId,
-        targetAccountId: row.actorId,
-      });
-    }
+  if (!row) return;
+  // Only the followed actor may reject the follow.
+  const actorId = typeof activity.actor === "string" ? activity.actor : activity.actor.id;
+  if (actorId !== row.targetId) return;
+
+  await updateFollowState(ctx.db, row.id, "rejected");
+  const follower = await getActorById(ctx.db, row.actorId);
+  if (follower?.isLocal) {
+    await createNotification(ctx.db, {
+      id: generateId(),
+      type: "follow_reject",
+      accountId: row.targetId,
+      targetAccountId: row.actorId,
+    });
   }
 }
 
@@ -129,6 +197,8 @@ async function handleUndo(activity: APActivity, ctx: InboxContext): Promise<void
   if (innerType === "follow") {
     const targetId = typeof obj.object === "string" ? obj.object : (obj.object as APActor)?.id;
     if (targetId) {
+      const follow = await getFollow(ctx.db, actorId, targetId);
+      if (!follow) return;
       await deleteFollow(ctx.db, actorId, targetId);
       const target = await getActorById(ctx.db, targetId);
       if (target) {
@@ -142,6 +212,7 @@ async function handleDelete(activity: APActivity, ctx: InboxContext): Promise<vo
   const actorId = typeof activity.actor === "string" ? activity.actor : activity.actor.id;
   const objectId = typeof activity.object === "string" ? activity.object : (activity.object as { id: string })?.id;
   if (!objectId) return;
+  // Only the author may delete their own object.
   const obj = await ctx.db
     .prepare("SELECT id FROM objects WHERE id = ? AND actor_id = ?")
     .bind(objectId, actorId)
@@ -154,7 +225,7 @@ async function handleDelete(activity: APActivity, ctx: InboxContext): Promise<vo
 async function handleUpdate(activity: APActivity, ctx: InboxContext): Promise<void> {
   const obj = activity.object as APActor | undefined;
   if (!obj || typeof obj !== "object") return;
-  if (["Person", "Service"].includes(obj.type)) {
+  if (["Person", "Service", "Application", "Group", "Organization"].includes(obj.type)) {
     const actorId = typeof activity.actor === "string" ? activity.actor : (activity.actor as APActor).id;
     if (obj.id !== actorId) return;
     await updateActorFields(ctx.db, obj.id, {
@@ -166,7 +237,11 @@ async function handleUpdate(activity: APActivity, ctx: InboxContext): Promise<vo
   }
 }
 
-async function updateActorFields(db: any, actorId: string, fields: { displayName?: string | null; summary?: string | null; avatarUrl?: string | null; headerUrl?: string | null }): Promise<void> {
+async function updateActorFields(
+  db: D1Database,
+  actorId: string,
+  fields: { displayName?: string | null; summary?: string | null; avatarUrl?: string | null; headerUrl?: string | null }
+): Promise<void> {
   const { displayName, summary, avatarUrl, headerUrl } = fields;
   await db
     .prepare("UPDATE actors SET display_name = COALESCE(?, display_name), summary = COALESCE(?, summary), avatar_url = COALESCE(?, avatar_url), header_url = COALESCE(?, header_url), updated_at = datetime('now') WHERE id = ?")
@@ -174,8 +249,12 @@ async function updateActorFields(db: any, actorId: string, fields: { displayName
     .run();
 }
 
-async function ensureActorCached(db: any, actorId: string): Promise<APActor | null> {
-  let actor = await getActorById(db, actorId);
+async function ensureActorCached(
+  db: D1Database,
+  actorId: string,
+  signingKey?: LocalSigningKey | null
+): Promise<APActor | null> {
+  const actor = await getActorById(db, actorId);
   if (actor) {
     return {
       id: actor.id,
@@ -190,13 +269,13 @@ async function ensureActorCached(db: any, actorId: string): Promise<APActor | nu
     } as APActor;
   }
   try {
-    const fetched = await fetchRemoteObject(actorId) as APActor | null;
+    const fetched = (await fetchRemoteObject(
+      actorId,
+      signingKey ? `${signingKey.id}#main-key` : undefined,
+      signingKey?.privateKeyPem
+    )) as APActor | null;
     if (fetched?.publicKey?.publicKeyPem) {
-      const domain = new URL(fetched.id).hostname;
-      await db
-        .prepare("INSERT OR REPLACE INTO actors (id, username, domain, display_name, summary, avatar_url, header_url, public_key_pem, inbox, is_local, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))")
-        .bind(fetched.id, fetched.preferredUsername, domain, fetched.name ?? null, fetched.summary ?? null, fetched.icon?.url ?? null, fetched.image?.url ?? null, fetched.publicKey.publicKeyPem, fetched.inbox ?? null)
-        .run();
+      await cacheRemoteActor(db, fetched);
       return fetched;
     }
   } catch { /* ignore */ }

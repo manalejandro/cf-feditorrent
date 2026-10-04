@@ -1,25 +1,39 @@
 import { NextRequest } from "next/server";
 import { getCloudflareContext, json } from "@/lib/cf";
-import { verifySignature, extractSigningKeyId } from "@/lib/activitypub/security";
+import { extractSigningKeyId } from "@/lib/activitypub/security";
+import { verifyIncomingSignature } from "@/lib/activitypub/signer-key";
 import { processInboxActivity } from "@/lib/activitypub/inbox";
-import { getActorByUsername, getActorById } from "@/lib/db";
-import { fetchRemoteObject } from "@/lib/activitypub/federation";
+import { getActorByUsername } from "@/lib/db";
 import type { APActivity } from "@/lib/types";
 
+// 1 MB is far above any legitimate AP activity we accept.
+const MAX_BODY_BYTES = 1_000_000;
+
+// POST /users/:username/inbox — Personal inbox for federation delivery
 export async function POST(request: NextRequest, { params }: { params: Promise<{ username: string }> }) {
   const { env } = getCloudflareContext();
   const { username } = await params;
-  const domain = new URL(env.INSTANCE_URL).hostname;
+  const baseUrl = env.INSTANCE_URL;
+  const domain = new URL(baseUrl).hostname;
 
   const recipient = await getActorByUsername(env.DB, username, domain);
   if (!recipient || !recipient.isLocal) return json({ error: "Not found" }, 404);
 
-  const body = await request.text();
+  let rawBody: string;
+  try {
+    rawBody = await request.text();
+  } catch {
+    return json({ error: "Could not read request body" }, 400);
+  }
+  if (rawBody.length > MAX_BODY_BYTES) {
+    return json({ error: "Payload too large" }, 413);
+  }
+
   let activity: APActivity;
   try {
-    activity = JSON.parse(body);
+    activity = JSON.parse(rawBody);
   } catch {
-    return json({ error: "Invalid JSON" }, 400);
+    return json({ error: "Invalid JSON body" }, 400);
   }
 
   const actorId = typeof activity.actor === "string" ? activity.actor : activity.actor?.id;
@@ -28,46 +42,46 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const headers: Record<string, string> = {};
   request.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });
 
-  let remoteActor = await getActorById(env.DB, actorId);
-  if (!remoteActor) {
-    const fetched = await fetchRemoteObject(actorId) as any;
-    if (fetched?.publicKey?.publicKeyPem) {
-      const rDomain = new URL(fetched.id).hostname;
-      await env.DB
-        .prepare("INSERT OR REPLACE INTO actors (id, username, domain, display_name, summary, avatar_url, header_url, public_key_pem, inbox, is_local, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))")
-        .bind(fetched.id, fetched.preferredUsername, rDomain, fetched.name ?? null, fetched.summary ?? null, fetched.icon?.url ?? null, fetched.image?.url ?? null, fetched.publicKey.publicKeyPem, fetched.inbox ?? null)
-        .run();
-      remoteActor = await getActorById(env.DB, actorId);
-    }
-  }
+  const sigKeyId = extractSigningKeyId(headers);
+  const signingActorId = sigKeyId ? sigKeyId.replace(/#.*$/, "") : actorId;
 
-  if (!remoteActor) return json({ error: "Could not resolve actor" }, 400);
+  const signingKey = recipient.privateKeyPem
+    ? { id: recipient.id, privateKeyPem: recipient.privateKeyPem }
+    : undefined;
 
-  const valid = await verifySignature("POST", request.url, headers, remoteActor.publicKeyPem, body);
-  if (!valid) {
-    const sigKeyId = extractSigningKeyId(headers);
-    let fetchedKeyPem = remoteActor.publicKeyPem;
-    if (sigKeyId) {
-      try {
-        const keyObj = await fetchRemoteObject(sigKeyId) as any;
-        if (keyObj?.publicKeyPem) fetchedKeyPem = keyObj.publicKeyPem;
-      } catch {}
-      const retryValid = await verifySignature("POST", request.url, headers, fetchedKeyPem, body);
-      if (!retryValid) return json({ error: "Invalid signature" }, 401);
-    } else {
-      return json({ error: "Invalid signature" }, 401);
-    }
-  }
-
-  await processInboxActivity(activity, {
-    db: env.DB,
-    baseUrl: env.INSTANCE_URL,
-    recipient: {
-      id: recipient.id,
-      username: recipient.username,
-      privateKeyPem: recipient.privateKeyPem!,
-    },
+  const check = await verifyIncomingSignature(env.DB, {
+    method: "POST",
+    url: `${baseUrl}/users/${username}/inbox`,
+    headers,
+    body: rawBody,
+    signingKeyId: sigKeyId ?? `${actorId}#main-key`,
+    signingKey,
   });
+  if (!check.ok) {
+    const detail = check.status ? ` (HTTP ${check.status})` : "";
+    console.warn(`[inbox] ${check.reason} for ${signingActorId}${detail} (user ${username})`);
+    return check.reason === "no-key"
+      ? json({ error: "Cannot verify signature: no public key" }, 503)
+      : json({ error: "Invalid HTTP signature" }, 401);
+  }
+
+  if (recipient.privateKeyPem) {
+    try {
+      await processInboxActivity(activity, {
+        db: env.DB,
+        baseUrl,
+        signingActorId,
+        signingKey,
+        recipient: {
+          id: recipient.id,
+          username: recipient.username,
+          privateKeyPem: recipient.privateKeyPem,
+        },
+      });
+    } catch {
+      // Still return 202 so the remote server does not keep retrying.
+    }
+  }
 
   return new Response(null, { status: 202 });
 }

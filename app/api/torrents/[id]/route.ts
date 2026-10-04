@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { getCloudflareContext, json, unauthorized, notFound } from "@/lib/cf";
 import { getSessionActor } from "@/lib/auth";
 import { generateId, buildDelete, activityIRI } from "@/lib/activitypub/utils";
-import { getTorrentById, deleteTorrent, getObjectById, deleteObject, createActivity, getFollowerIds, getActorById, updateActorCounts } from "@/lib/db";
+import { getTorrentById, deleteTorrent, deleteObject, createActivity, getFollowerIds, getActorById, updateActorCounts } from "@/lib/db";
 import { enqueueDeliveries } from "@/lib/activitypub/queue";
 import { collectFollowerInboxes } from "@/lib/activitypub/federation";
 import { PUBLIC_ADDRESS } from "@/lib/activitypub/vocab";
@@ -43,7 +43,14 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
           const fetchActorFn = async (id: string) => getActorById(env.DB, id);
           const inboxes = await collectFollowerInboxes(followerIds, fetchActorFn);
           if (inboxes.length > 0) {
-            await enqueueDeliveries(env.DELIVERY_QUEUE, inboxes, JSON.stringify(deleteActivity), session.id);
+            await enqueueDeliveries(
+              env.DELIVERY_QUEUE,
+              inboxes,
+              JSON.stringify(deleteActivity),
+              session.id,
+              `${actor.id}#main-key`,
+              actor.privateKeyPem
+            );
           }
         }
       }

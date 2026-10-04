@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { getCloudflareContext, json, badRequest, unauthorized } from "@/lib/cf";
 import { getSessionActor } from "@/lib/auth";
-import { generateId, objectIRI, activityIRI, buildTorrentNote, buildCreate, actorIRI, followersIRI } from "@/lib/activitypub/utils";
+import { generateId, objectIRI, activityIRI, buildTorrentNote, buildCreate, followersIRI } from "@/lib/activitypub/utils";
 import { getTorrentsByActor, getTorrentBySlug, createTorrent, createObject, createActivity, getFollowerIds, getActorById, updateActorCounts } from "@/lib/db";
 import { enqueueDeliveries } from "@/lib/activitypub/queue";
 import { collectFollowerInboxes } from "@/lib/activitypub/federation";
@@ -133,7 +133,14 @@ export async function POST(request: NextRequest) {
           const fetchActorFn = async (id: string) => getActorById(env.DB, id);
           const inboxes = await collectFollowerInboxes(followerIds, fetchActorFn);
           if (inboxes.length > 0) {
-            await enqueueDeliveries(env.DELIVERY_QUEUE, inboxes, JSON.stringify(apCreateActivity), session.id);
+            await enqueueDeliveries(
+              env.DELIVERY_QUEUE,
+              inboxes,
+              JSON.stringify(apCreateActivity),
+              session.id,
+              `${actor.id}#main-key`,
+              actor.privateKeyPem
+            );
           }
         }
       }

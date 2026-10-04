@@ -245,3 +245,27 @@ export function isPublic(activity: APActivity): boolean {
 export function extractDomain(url: string): string {
   return new URL(url).hostname;
 }
+
+export function isLocalIRI(iri: string, domain: string): boolean {
+  try {
+    return new URL(iri).hostname === domain;
+  } catch {
+    return false;
+  }
+}
+
+export function extractUsername(actorId: string): string | null {
+  const match = actorId.match(/\/users\/([^/]+)$/);
+  return match ? match[1] : null;
+}
+
+/** Collect all inbox recipients from an activity's audiences. */
+export function getRecipientInboxes(
+  to: string[],
+  cc: string[],
+  actorInbox: string
+): string[] {
+  return [...to, ...cc].filter(
+    (addr) => addr !== PUBLIC_ADDRESS && addr !== actorInbox
+  );
+}

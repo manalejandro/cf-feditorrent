@@ -14,22 +14,22 @@
     "db:drop": "wrangler d1 execute cf-feditorrent --remote --command='DROP TABLE IF EXISTS sessions; DROP TABLE IF EXISTS delivery_failures; DROP TABLE IF EXISTS notifications; DROP TABLE IF EXISTS activities; DROP TABLE IF EXISTS follows; DROP TABLE IF EXISTS objects; DROP TABLE IF EXISTS torrents; DROP TABLE IF EXISTS actors;'"
   },
   "dependencies": {
-    "@cloudflare/workers-types": "^5.20260711.1",
-    "@opennextjs/cloudflare": "^1.20.1",
+    "@cloudflare/workers-types": "^5.20261003.1",
+    "@opennextjs/cloudflare": "^1.20.8",
     "nanoid": "^5.1.16",
-    "next": "16.2.10",
+    "next": "^16.3.8",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^20.19.43",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "eslint": "^9.39.5",
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
-    "typescript": "^5",
-    "wrangler": "^4.110.0"
+    "typescript": "^5.9.3",
+    "wrangler": "^4.147.0"
   }
 }

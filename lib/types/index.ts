@@ -125,6 +125,7 @@ export interface LocalActor {
   passwordHash: string | null;
   emailVerified: boolean;
   inbox?: string;
+  sharedInbox?: string | null;
 }
 
 export interface LocalTorrent {

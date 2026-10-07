@@ -31,6 +31,7 @@ function rowToActor(r: Row): LocalActor {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     inbox: r.inbox ?? null,
+    sharedInbox: r.shared_inbox ?? null,
   };
 }
 

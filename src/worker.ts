@@ -1,4 +1,5 @@
 import type { MessageBatch } from "@cloudflare/workers-types";
+import handler from "vinext/server/fetch-handler";
 import { postToInboxSigned, validateOutboundUrl } from "@/lib/activitypub/federation";
 import type { APDeliveryMessage } from "@/lib/activitypub/queue";
 export { TrackerDO } from "./tracker-do";
@@ -84,7 +85,7 @@ function hexFromUrl(url: string): string {
   return hex;
 }
 
-export default {
+const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/api/tracker/announce") {
@@ -143,9 +144,7 @@ export default {
       });
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const handler = (await import("../.open-next/worker.js")) as any;
-    return handler.default.fetch(request, env, ctx);
+    return handler.fetch(request, env, ctx);
   },
 
   async queue(batch: MessageBatch<APDeliveryMessage>, env: Env): Promise<void> {
@@ -164,3 +163,5 @@ export default {
     }
   },
 };
+
+export default worker;

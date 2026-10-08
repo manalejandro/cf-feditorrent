@@ -1,7 +1,9 @@
+export type Bencoded = number | string | Uint8Array | Bencoded[] | { [key: string]: Bencoded };
+
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
-export function bencodeParse(data: Uint8Array, offset = 0): { val: any; end: number } {
+export function bencodeParse(data: Uint8Array, offset = 0): { val: Bencoded; end: number } {
   const b = data[offset];
   if (b === 0x69) {
     let end = offset + 1;
@@ -16,12 +18,12 @@ export function bencodeParse(data: Uint8Array, offset = 0): { val: any; end: num
     return { val: data.slice(start, start + len), end: start + len };
   }
   if (b === 0x6c) {
-    let pos = offset + 1; const arr: any[] = [];
+    let pos = offset + 1; const arr: Bencoded[] = [];
     while (data[pos] !== 0x65) { const r = bencodeParse(data, pos); arr.push(r.val); pos = r.end; }
     return { val: arr, end: pos + 1 };
   }
   if (b === 0x64) {
-    let pos = offset + 1; const dict: Record<string, any> = {};
+    let pos = offset + 1; const dict: Record<string, Bencoded> = {};
     while (data[pos] !== 0x65) {
       const k = bencodeParse(data, pos); const v = bencodeParse(data, k.end);
       dict[dec.decode(k.val as Uint8Array)] = v.val; pos = v.end;
@@ -31,8 +33,8 @@ export function bencodeParse(data: Uint8Array, offset = 0): { val: any; end: num
   throw new Error("Invalid bencode at " + offset);
 }
 
-export function bencodeEncode(val: any): Uint8Array {
-  const c = (v: any) => bencodeEncode(v) as any;
+export function bencodeEncode(val: Bencoded): Uint8Array {
+  const c = (v: Bencoded) => bencodeEncode(v);
   if (typeof val === "number") return enc.encode("i" + val + "e");
   if (val instanceof Uint8Array) {
     const prefix = enc.encode(val.length + ":");
@@ -48,7 +50,7 @@ export function bencodeEncode(val: any): Uint8Array {
     return out;
   }
   if (Array.isArray(val)) {
-    const parts = [enc.encode("l")];
+    const parts: Uint8Array[] = [enc.encode("l")];
     for (const v of val) parts.push(c(v));
     parts.push(enc.encode("e"));
     const total = parts.reduce((s, p) => s + p.length, 0);
@@ -58,7 +60,7 @@ export function bencodeEncode(val: any): Uint8Array {
   }
   if (typeof val === "object" && val !== null) {
     const keys = Object.keys(val).sort();
-    const parts = [enc.encode("d")];
+    const parts: Uint8Array[] = [enc.encode("d")];
     for (const k of keys) { parts.push(c(k)); parts.push(c(val[k])); }
     parts.push(enc.encode("e"));
     const total = parts.reduce((s, p) => s + p.length, 0);

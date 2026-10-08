@@ -1,4 +1,4 @@
-import { getCloudflareContext, unauthorized } from "@/lib/cf";
+
 
 export async function hashPassword(password: string): Promise<string> {
   const encoder = new TextEncoder();
@@ -30,7 +30,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
 }
 
 export async function createSessionToken(
-  db: any,
+  db: D1Database,
   actorId: string,
   userId: string
 ): Promise<string> {
@@ -43,7 +43,7 @@ export async function createSessionToken(
 }
 
 export async function getSessionActor(
-  db: any,
+  db: D1Database,
   token: string
 ): Promise<{ id: string; username: string; domain: string } | null> {
   const row = await db

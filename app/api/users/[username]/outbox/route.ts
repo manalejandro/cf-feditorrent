@@ -1,12 +1,12 @@
 import { NextRequest } from "next/server";
-import { getCloudflareContext, json, activityJson, notFound } from "@/lib/cf";
+import { activityJson, notFound } from "@/lib/cf";
 import { getActorByUsername, getTorrentsByActor, getObjectById } from "@/lib/db";
-import { buildOrderedCollection, buildOrderedCollectionPage, actorIRI, objectIRI, buildTorrentNote, buildCreate } from "@/lib/activitypub/utils";
-import { PUBLIC_ADDRESS, DEFAULT_CONTEXT } from "@/lib/activitypub/vocab";
-import type { APActivity, APTorrent } from "@/lib/types";
+import { buildOrderedCollection, buildOrderedCollectionPage, actorIRI, buildTorrentNote, buildCreate } from "@/lib/activitypub/utils";
+
+import type { APActivity } from "@/lib/types";
+import { env } from "cloudflare:workers";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ username: string }> }) {
-  const { env } = getCloudflareContext();
   const { username } = await params;
   const domain = new URL(env.INSTANCE_URL).hostname;
 

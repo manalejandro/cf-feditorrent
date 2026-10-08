@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
-import { getCloudflareContext, json, badRequest, unauthorized } from "@/lib/cf";
+import { json, badRequest, unauthorized } from "@/lib/cf";
 import { verifyPassword, createSessionToken } from "@/lib/auth";
 import { getActorByUsername, getActorByEmail } from "@/lib/db";
+import { env } from "cloudflare:workers";
 
 async function verifyTurnstile(token: string, secret: string): Promise<boolean> {
   try {
@@ -10,7 +11,7 @@ async function verifyTurnstile(token: string, secret: string): Promise<boolean> 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ secret, response: token }),
     });
-    const data: any = await res.json();
+    const data = await res.json() as { success?: boolean };
     return data.success === true;
   } catch {
     return false;
@@ -19,7 +20,6 @@ async function verifyTurnstile(token: string, secret: string): Promise<boolean> 
 
 export async function POST(request: NextRequest) {
   try {
-    const { env } = getCloudflareContext();
     const { username, password, turnstileToken } = await request.json() as { username?: string; password?: string; turnstileToken?: string };
 
     if (!username || !password) return badRequest("Username and password are required");

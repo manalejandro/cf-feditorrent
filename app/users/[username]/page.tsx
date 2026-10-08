@@ -1,9 +1,11 @@
-import { getCloudflareContext } from "@/lib/cf";
+
 import { getActorByUsername, getTorrentsByActor } from "@/lib/db";
 import { notFound } from "next/navigation";
 import { FollowButton } from "@/components/FollowButton";
 import { dicts, type Locale } from "@/lib/i18n/dict";
 import { cookies } from "next/headers";
+import { env } from "cloudflare:workers";
+import Link from "next/link";
 
 function formatSize(bytes: number, d: typeof dicts.en): string {
   if (bytes === 0) return "0 " + d.sizeUnits.bytes;
@@ -14,7 +16,6 @@ function formatSize(bytes: number, d: typeof dicts.en): string {
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ username: string }> }) {
-  const { env } = getCloudflareContext();
   const { username } = await params;
   const domain = new URL(env.INSTANCE_URL).hostname;
   const actor = await getActorByUsername(env.DB, username, domain);
@@ -26,7 +27,6 @@ export async function generateMetadata({ params }: { params: Promise<{ username:
 }
 
 export default async function UserProfile({ params }: { params: Promise<{ username: string }> }) {
-  const { env } = getCloudflareContext();
   const { username } = await params;
   const domain = new URL(env.INSTANCE_URL).hostname;
   const actor = await getActorByUsername(env.DB, username, domain);
@@ -42,10 +42,10 @@ export default async function UserProfile({ params }: { params: Promise<{ userna
     <div className="min-h-screen flex flex-col">
       <nav className="sticky top-0 z-50 backdrop-blur-xl bg-background/80 border-b border-border">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <a href="/" className="flex items-center gap-2.5 group">
+          <Link href="/" className="flex items-center gap-2.5 group">
             <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-sm group-hover:scale-105 transition-transform">F</div>
             <span className="font-semibold text-lg">FediTorrent</span>
-          </a>
+          </Link>
         </div>
       </nav>
       <main className="flex-1 max-w-4xl mx-auto px-4 py-12 w-full">
@@ -97,7 +97,7 @@ export default async function UserProfile({ params }: { params: Promise<{ userna
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <a href={torrent.magnetUri} className="px-3 py-1.5 rounded-lg bg-secondary text-sm text-muted hover:text-foreground transition-colors">🧲</a>
-                    <a href={`/torrents/${torrent.slug}`} className="px-3 py-1.5 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors">View</a>
+                    <Link href={`/torrents/${torrent.slug}`} className="px-3 py-1.5 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors">View</Link>
                   </div>
                 </div>
               </div>

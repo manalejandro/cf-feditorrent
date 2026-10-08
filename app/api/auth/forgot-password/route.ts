@@ -1,11 +1,11 @@
 import { NextRequest } from "next/server";
-import { getCloudflareContext, json, badRequest } from "@/lib/cf";
+import { json, badRequest } from "@/lib/cf";
 import { getActorByEmail, setPasswordResetToken } from "@/lib/db";
 import { sendPasswordResetEmail } from "@/lib/email";
+import { env } from "cloudflare:workers";
 
 export async function POST(request: NextRequest) {
   try {
-    const { env } = getCloudflareContext();
     const { email } = await request.json() as { email?: string };
 
     if (!email) return badRequest("Email is required");

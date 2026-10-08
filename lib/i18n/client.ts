@@ -13,6 +13,7 @@ export function useLocale(): [Locale, (l: Locale) => void, Dict] {
   const [locale, setLocaleState] = useState<Locale>("en");
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate the stored locale after mount
     setLocaleState(getStoredLocale());
   }, []);
 

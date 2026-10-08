@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
-import { getCloudflareContext, json, badRequest } from "@/lib/cf";
+import { json, badRequest } from "@/lib/cf";
+import { env } from "cloudflare:workers";
 
 export async function POST(request: NextRequest) {
-  const { env } = getCloudflareContext();
   const body = await request.json().catch(() => ({})) as { infoHash?: string };
   const { infoHash } = body;
 

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCloudflareContext } from "@/lib/cf";
+
 import { verifyEmailByToken } from "@/lib/db";
+import { env } from "cloudflare:workers";
 
 export async function GET(request: NextRequest) {
   try {
-    const { env } = getCloudflareContext();
     const token = request.nextUrl.searchParams.get("token");
 
     if (!token) {

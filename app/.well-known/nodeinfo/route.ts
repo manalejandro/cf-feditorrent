@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
-import { getCloudflareContext, json } from "@/lib/cf";
+import { json } from "@/lib/cf";
+import { env } from "cloudflare:workers";
 
-export async function GET(request: NextRequest) {
-  const { env } = getCloudflareContext();
+export async function GET(_request: NextRequest) {
   return json({
     links: [
       {

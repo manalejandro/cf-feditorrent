@@ -1,15 +1,10 @@
 import { NextRequest } from "next/server";
-import { getCloudflareContext, activityJson, json, notFound } from "@/lib/cf";
+import { activityJson, json, notFound } from "@/lib/cf";
 import { getTorrentBySlug, getActorById } from "@/lib/db";
 import { incrementTorrentClicks } from "@/lib/db";
-
-async function getActor(env: any, torrent: any) {
-  try {
-    return await getActorById(env.DB, torrent.actorId);
-  } catch { return null; }
-}
-
-function renderTorrentPage(torrent: any, actor: any, baseUrl: string): string {
+import { env } from "cloudflare:workers";
+import type { LocalActor, LocalTorrent } from "@/lib/types";
+function renderTorrentPage(torrent: LocalTorrent & { fileUrl?: string | null }, actor: LocalActor | null, baseUrl: string): string {
   const magnetUri = torrent.magnetUri || "";
   const size = torrent.size || 0;
   const sizeStr = size > 0
@@ -130,7 +125,6 @@ function escapeHtml(s: string): string {
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
-  const { env } = getCloudflareContext();
   const { slug } = await params;
 
   const torrent = await getTorrentBySlug(env.DB, slug);
@@ -138,10 +132,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const accept = request.headers.get("accept") ?? "";
   if (accept.includes("application/activity+json") || accept.includes("application/ld+json")) {
-    const obj = torrent.objectId ? await env.DB.prepare("SELECT * FROM objects WHERE id = ?").bind(torrent.objectId).first() : null;
-    if (obj && (obj as any).raw && (obj as any).raw !== "{}") {
+    const obj = torrent.objectId ? await env.DB.prepare("SELECT * FROM objects WHERE id = ?").bind(torrent.objectId).first<{ raw?: string }>() : null;
+    if (obj && obj.raw && obj.raw !== "{}") {
       try {
-        const parsed = JSON.parse((obj as any).raw);
+        const parsed = JSON.parse(obj.raw);
         return activityJson(parsed);
       } catch {}
     }

@@ -1,12 +1,12 @@
 import { NextRequest } from "next/server";
-import { getCloudflareContext, json, badRequest, unauthorized } from "@/lib/cf";
+import { json, badRequest, unauthorized } from "@/lib/cf";
 import { getSessionActor } from "@/lib/auth";
-import { generateId, buildFollow, buildUndo, activityIRI } from "@/lib/activitypub/utils";
+import { generateId, buildFollow, buildUndo } from "@/lib/activitypub/utils";
 import { getActorById, getFollow, deleteFollow, updateActorCounts } from "@/lib/db";
 import { deliverToInbox } from "@/lib/activitypub/federation";
+import { env } from "cloudflare:workers";
 
 export async function POST(request: NextRequest) {
-  const { env } = getCloudflareContext();
   const auth = request.headers.get("authorization")?.replace("Bearer ", "");
   if (!auth) return unauthorized();
   const session = await getSessionActor(env.DB, auth);

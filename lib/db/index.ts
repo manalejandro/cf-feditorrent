@@ -8,6 +8,7 @@ import type {
   LocalNotification,
 } from "@/lib/types";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- D1 rows are dynamic; accessors cast at the use site
 type Row = Record<string, any>;
 
 function rowToActor(r: Row): LocalActor {

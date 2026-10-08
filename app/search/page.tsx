@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useLocale } from "@/lib/i18n/client";
+import Link from "next/link";
 
 interface ActorResult {
   id: string;
@@ -29,7 +30,7 @@ export default function SearchPage() {
       const res = await fetch(`/api/follow?targetId=${encodeURIComponent(actorId)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data: any = await res.json();
+      const data = await res.json() as { following?: boolean };
       if (data.following) {
         setFollowing((prev) => ({ ...prev, [actorId]: true }));
       }
@@ -68,7 +69,7 @@ export default function SearchPage() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ targetId }),
       });
-      const data: any = await res.json();
+      const data = await res.json() as { following?: boolean; message?: string };
       if (data.following === true || data.message === "Already following") {
         setFollowing((prev) => ({ ...prev, [targetId]: true }));
       }
@@ -97,12 +98,12 @@ export default function SearchPage() {
     <div className="min-h-screen flex flex-col">
       <nav className="sticky top-0 z-50 backdrop-blur-xl bg-background/80 border-b border-border">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <a href="/" className="flex items-center gap-2.5 group">
+          <Link href="/" className="flex items-center gap-2.5 group">
             <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-sm group-hover:scale-105 transition-transform">F</div>
             <span className="font-semibold text-lg">FediTorrent</span>
-          </a>
+          </Link>
           <div className="flex items-center gap-3">
-            <a href="/" className="text-sm text-muted hover:text-foreground transition-colors">{d.nav.home}</a>
+            <Link href="/" className="text-sm text-muted hover:text-foreground transition-colors">{d.nav.home}</Link>
             <button onClick={() => setLocale(locale === "en" ? "es" : "en")}
               className="px-3 py-1.5 rounded-lg bg-card border border-border text-sm font-medium text-muted hover:text-foreground transition-colors">
               {locale === "en" ? "ES" : "EN"}

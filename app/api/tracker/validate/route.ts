@@ -1,8 +1,8 @@
 import { NextRequest } from "next/server";
-import { getCloudflareContext, json, badRequest } from "@/lib/cf";
+import { json, badRequest } from "@/lib/cf";
+import { env } from "cloudflare:workers";
 
 export async function GET(request: NextRequest) {
-  const { env } = getCloudflareContext();
   const infoHash = request.nextUrl.searchParams.get("infoHash");
   const token = request.nextUrl.searchParams.get("token");
 

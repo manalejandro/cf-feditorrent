@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Link from "next/link";
+import type { Bencoded } from "@/lib/torrent/bencode";
 
 async function parseTorrentFile(file: File): Promise<{ infoHash: string; name: string; magnetUri: string; size: number; fileCount: number } | null> {
   try {
@@ -8,9 +10,9 @@ async function parseTorrentFile(file: File): Promise<{ infoHash: string; name: s
     const buf = await file.arrayBuffer();
     const raw = new Uint8Array(buf);
     const parsed = bencodeParse(raw);
-    const info = parsed.val.info;
+    const info = (parsed.val as { info?: Record<string, unknown> }).info;
     if (!info || typeof info !== "object") return null;
-    const rawInfo = bencodeEncode(info);
+    const rawInfo = bencodeEncode(info as Bencoded);
     const hash = await crypto.subtle.digest("SHA-1", rawInfo as BufferSource);
     const infoHash = Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
     const name = typeof info.name === "string" ? info.name : (info.name instanceof Uint8Array ? new TextDecoder().decode(info.name) : "Torrent");
@@ -276,6 +278,8 @@ interface Torrent {
   shortUrl: string;
 }
 
+type TorrentView = Torrent & { fileUrl?: string | null; actorUsername?: string | null; actorDomain?: string | null };
+
 function formatSize(bytes: number, d: D): string {
   if (bytes === 0) return "0 " + d.bytes;
   const k = 1024;
@@ -330,6 +334,7 @@ function AuthModal({ d, showAuth, setShowAuth, showRegister, setShowRegister, on
 
   useEffect(() => {
     if (!showAuth) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset the auth form when the dialog closes
       setUsernameInput(""); setEmail(""); setPassword("");
       setConfirmPassword(""); setAuthError("");
       setShowForgot(false); setForgotSent(false);
@@ -385,7 +390,7 @@ function AuthModal({ d, showAuth, setShowAuth, showRegister, setShowRegister, on
       const res = await fetch(endpoint, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
-      const data: any = await res.json();
+      const data = await res.json() as { error?: string; verified?: boolean; token: string; username: string; actorId: string };
       if (!res.ok) {
         if (res.status === 403) { setResendEmail(email || usernameInput); setShowResend(true); }
         setAuthError(data.error || "Error");
@@ -542,12 +547,13 @@ export default function Home() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [isSeeding, setIsSeeding] = useState(false);
   const [seedingInfo, setSeedingInfo] = useState<{ infoHash: string; name: string; magnetUri: string; size: number; fileCount: number } | null>(null);
-  const [torrentView, setTorrentView] = useState<any | null>(null);
+  const [torrentView, setTorrentView] = useState<TorrentView | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const v = params.get("verified");
     if (v === "true") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- read the email-verification result from the URL once
       setVerificationStatus({ ok: true });
       const url = new URL(window.location.href);
       url.searchParams.delete("verified"); url.searchParams.delete("reason");
@@ -564,7 +570,7 @@ export default function Home() {
     if (ts) {
       fetch(`/torrents/${ts}`, { headers: { Accept: "application/json" } })
         .then((r) => r.ok ? r.json() : null)
-        .then((data) => { if (data) setTorrentView(data); })
+        .then((data) => { if (data) setTorrentView(data as TorrentView); })
         .catch(() => {});
     }
   }, []);
@@ -574,6 +580,7 @@ export default function Home() {
 
   useEffect(() => {
     const savedLocale = localStorage.getItem("ft_locale") as Locale | null;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate the stored locale after mount
     if (savedLocale === "en" || savedLocale === "es") setLocale(savedLocale);
   }, []);
 
@@ -582,7 +589,7 @@ export default function Home() {
       fetch("/api/torrents", { headers: { Authorization: `Bearer ${token}` } })
         .then((r) => r.json()).then((data) => { if (Array.isArray(data)) setTorrents(data); }).catch(() => {});
       fetch("/api/notifications/count", { headers: { Authorization: `Bearer ${token}` } })
-        .then((r) => r.json()).then((data) => setUnreadCount((data as any).count ?? 0)).catch(() => {});
+        .then((r) => r.json()).then((data) => setUnreadCount((data as { count?: number }).count ?? 0)).catch(() => {});
     }
   }, [token]);
 
@@ -591,7 +598,7 @@ export default function Home() {
     if (mode === "torrent" && (!seedingInfo || !seedingInfo.magnetUri)) return;
     setCreating(true); setError(""); setSuccessUrl("");
     try {
-      const body: Record<string, any> = { name: newName || "Torrent", description: newDesc };
+      const body: Record<string, unknown> = { name: newName || "Torrent", description: newDesc };
       if (mode === "magnet") {
         body.magnetUri = newMagnet;
         body.magnetOnly = true;
@@ -611,7 +618,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
       });
-      const data: any = await res.json();
+      const data = await res.json() as Torrent & { error?: string };
       if (!res.ok) { setError(data.error || "Error"); return; }
       setSuccessUrl(data.shortUrl);
       setNewName(""); setNewMagnet(""); setNewDesc(""); setUploadedFiles([]); setSeedingInfo(null); setIsSeeding(false);
@@ -641,7 +648,7 @@ export default function Home() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token: resetToken, password: resetPassword }),
       });
-      const data: any = await res.json();
+      const data = await res.json() as { error?: string };
       if (!res.ok) { setResetError(data.error || "Error"); return; }
       setResetDone(true);
     } catch { setResetError("Network error"); }
@@ -675,11 +682,9 @@ export default function Home() {
   };
 
   const fileInputRef2 = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
   const handleWebTorrentUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setError("");
-    setUploading(true);
     try {
       const file = files[0];
       const formData = new FormData();
@@ -690,19 +695,19 @@ export default function Home() {
         headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
-      const data: any = await res.json();
+      const data = await res.json() as Torrent & { error?: string };
       if (!res.ok) { setError(data.error || "Upload failed"); return; }
       setSuccessUrl(data.shortUrl);
       setNewName(""); setNewDesc(""); setUploadedFiles([]);
       setTorrents((prev) => [data, ...prev]);
     } catch { setError("Upload failed"); }
-    finally { setUploading(false); }
   };
 
   const [showAuth, setShowAuth] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- open the auth dialog when the parent bumps the CTA counter
     if (ctaKey && ctaKey > 0) { setShowAuth(true); setShowRegister(true); }
   }, [ctaKey]);
 
@@ -710,24 +715,24 @@ export default function Home() {
     <div className="min-h-screen flex flex-col">
       <nav className="sticky top-0 z-50 backdrop-blur-xl bg-background/80 border-b border-border">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <a href="/" className="flex items-center gap-2.5 group">
+          <Link href="/" className="flex items-center gap-2.5 group">
             <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-sm group-hover:scale-105 transition-transform">F</div>
             <span className="font-semibold text-lg">{d.title}</span>
-          </a>
+          </Link>
           <div className="flex items-center gap-3">
             <Toggle locale={locale} setLocale={setLocale} />
             {token ? (
               <>
-                <a href="/search" className="text-sm text-muted hover:text-foreground transition-colors">{d.search}</a>
-                <a href="/notifications" className="text-sm text-muted hover:text-foreground transition-colors relative">{d.notifications}
+                <Link href="/search" className="text-sm text-muted hover:text-foreground transition-colors">{d.search}</Link>
+                <Link href="/notifications" className="text-sm text-muted hover:text-foreground transition-colors relative">{d.notifications}
                   {unreadCount > 0 && (
                     <span className="absolute -top-1.5 -right-3 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-error text-[10px] font-bold text-white px-1">
                       {unreadCount > 9 ? "9+" : unreadCount}
                     </span>
                   )}
-                </a>
-                <a href={`/users/${username}`} className="text-sm text-muted hover:text-foreground transition-colors">{username}</a>
-                <a href="/links" className="px-4 py-2 rounded-lg bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition-colors">{d.myTorrents}</a>
+                </Link>
+                <Link href={`/users/${username}`} className="text-sm text-muted hover:text-foreground transition-colors">{username}</Link>
+                <Link href="/links" className="px-4 py-2 rounded-lg bg-primary/10 text-primary text-sm font-medium hover:bg-primary/20 transition-colors">{d.myTorrents}</Link>
                 <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="text-sm text-muted hover:text-error transition-colors">{d.logout}</button>
               </>
             ) : (
@@ -871,14 +876,14 @@ export default function Home() {
               <details className="mt-4 text-sm">
                 <summary className="cursor-pointer text-muted hover:text-foreground">Download commands</summary>
                 <pre className="mt-2 p-3 rounded-lg bg-secondary text-xs font-mono overflow-x-auto text-muted leading-relaxed">
-# aria2 (recommended)
-aria2c "{torrentView.torrentFileUrl || torrentView.fileUrl}"
+{`# aria2 (recommended)
+aria2c "${torrentView.torrentFileUrl || torrentView.fileUrl}"
 
 # curl
-curl -L -o "{torrentView.name}" "{torrentView.fileUrl}"
+curl -L -o "${torrentView.name}" "${torrentView.fileUrl}"
 
 # wget
-wget "{torrentView.fileUrl}"
+wget "${torrentView.fileUrl}"`}
                 </pre>
               </details>
               <button onClick={() => { setTorrentView(null); window.history.replaceState({}, "", "/"); }} className="mt-6 text-sm text-muted hover:text-foreground transition-colors">Close</button>

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCloudflareContext, activityJson, notFound } from "@/lib/cf";
+import { activityJson, notFound } from "@/lib/cf";
 import { getObjectById, getTorrentById } from "@/lib/db";
-import { buildTorrentNote, actorIRI } from "@/lib/activitypub/utils";
+import { buildTorrentNote } from "@/lib/activitypub/utils";
+import { env } from "cloudflare:workers";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { env } = getCloudflareContext();
   const { id } = await params;
 
   const obj = await getObjectById(env.DB, id);

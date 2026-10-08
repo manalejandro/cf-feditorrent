@@ -1,9 +1,9 @@
-import { bencodeEncode } from "./bencode";
+import { bencodeEncode, type Bencoded } from "./bencode";
 
 const PIECE_LENGTH = 1_048_576; // 1MB
 
 async function sha1Bytes(data: Uint8Array): Promise<Uint8Array> {
-  return new Uint8Array(await crypto.subtle.digest("SHA-1", data as any));
+  return new Uint8Array(await crypto.subtle.digest("SHA-1", data as unknown as BufferSource));
 }
 
 export async function computeTorrentInfo(
@@ -19,7 +19,7 @@ export async function computeTorrentInfo(
   for (let i = 0; i < pieceHashes.length; i++) {
     pieces.set(pieceHashes[i], i * 20);
   }
-  const infoDict: Record<string, any> = {
+  const infoDict: Record<string, Bencoded> = {
     name: filename,
     length: fileData.length,
     "piece length": PIECE_LENGTH,
@@ -46,7 +46,7 @@ export function buildTorrentFile(
   pieces: Uint8Array,
   pieceLength: number
 ): Uint8Array {
-  const torrent: Record<string, any> = {
+  const torrent: Record<string, Bencoded> = {
     announce: announceUrl,
     "url-list": [fileUrl],
     info: {

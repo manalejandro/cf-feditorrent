@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
-import { getCloudflareContext, json } from "@/lib/cf";
-import { searchActors, getActorByUsernameAndDomain, getActorById } from "@/lib/db";
+import { json } from "@/lib/cf";
+import { searchActors, getActorByUsernameAndDomain } from "@/lib/db";
 import { resolveWebFinger, fetchRemoteObject } from "@/lib/activitypub/federation";
+import { env } from "cloudflare:workers";
+import type { APActor } from "@/lib/types";
 
 export async function GET(request: NextRequest) {
-  const { env } = getCloudflareContext();
   const q = request.nextUrl.searchParams.get("q") || "";
   const limit = parseInt(request.nextUrl.searchParams.get("limit") || "20");
   const resolve = request.nextUrl.searchParams.get("resolve") !== "false";
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest) {
       if (!actor && resolve) {
         const href = await resolveWebFinger(normalized);
         if (href) {
-          const fetched = await fetchRemoteObject(href) as any;
+          const fetched = await fetchRemoteObject(href) as APActor | null;
           if (fetched?.publicKey?.publicKeyPem) {
             await env.DB
               .prepare("INSERT OR REPLACE INTO actors (id, username, domain, display_name, summary, avatar_url, header_url, public_key_pem, inbox, shared_inbox, is_local, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))")

@@ -1,5 +1,4 @@
-import { getCloudflareContext } from "@/lib/cf";
-
+import { env } from "cloudflare:workers";
 function buildHtml(type: string, data: Record<string, string>): string {
   const base = (content: string) => `<!DOCTYPE html><html><body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px"><div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:30px;border-radius:12px 12px 0 0;text-align:center"><h1 style="color:white;margin:0;font-size:24px">FediTorrent</h1></div><div style="background:#fff;border:1px solid #e5e7eb;border-top:0;padding:30px;border-radius:0 0 12px 12px">${content}</div></body></html>`;
 
@@ -15,13 +14,9 @@ function buildHtml(type: string, data: Record<string, string>): string {
   }
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
 
 export async function trySend(to: string, subject: string, html: string): Promise<void> {
   try {
-    const { env } = getCloudflareContext();
     if (env.EMAIL && env.EMAIL_FROM) {
       await env.EMAIL.send({
         to,
@@ -38,18 +33,15 @@ export async function trySend(to: string, subject: string, html: string): Promis
 }
 
 export async function sendVerificationEmail(actorId: string, email: string, token: string): Promise<void> {
-  const { env } = getCloudflareContext();
   const link = `${env.INSTANCE_URL}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
   await trySend(email, `Verify your ${env.INSTANCE_TITLE} account`, buildHtml("verification", { link }));
 }
 
 export async function sendPasswordResetEmail(email: string, token: string): Promise<void> {
-  const { env } = getCloudflareContext();
   const link = `${env.INSTANCE_URL}/?reset-token=${encodeURIComponent(token)}`;
   await trySend(email, `Reset your ${env.INSTANCE_TITLE} password`, buildHtml("password-reset", { link }));
 }
 
 export async function sendPasswordResetConfirmation(email: string): Promise<void> {
-  const { env } = getCloudflareContext();
   await trySend(email, `${env.INSTANCE_TITLE} password reset`, buildHtml("password-reset-confirm", {}));
 }

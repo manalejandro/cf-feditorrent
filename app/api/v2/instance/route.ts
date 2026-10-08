@@ -1,10 +1,9 @@
 import { NextRequest } from "next/server";
-import { getCloudflareContext, json } from "@/lib/cf";
+import { json } from "@/lib/cf";
+import { env } from "cloudflare:workers";
 
-export async function GET(request: NextRequest) {
-  const { env } = getCloudflareContext();
-  const actorCount = await env.DB.prepare("SELECT COUNT(*) as count FROM actors WHERE is_local = 1").first() as any;
-  const torrentCount = await env.DB.prepare("SELECT COUNT(*) as count FROM torrents").first() as any;
+export async function GET(_request: NextRequest) {
+  const actorCount = await env.DB.prepare("SELECT COUNT(*) as count FROM actors WHERE is_local = 1").first() as { count: number } | null;
 
   return json({
     domain: new URL(env.INSTANCE_URL).hostname,

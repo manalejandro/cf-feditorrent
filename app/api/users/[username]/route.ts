@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCloudflareContext, activityJson, notFound } from "@/lib/cf";
-import { getActorByUsername, getActorById } from "@/lib/db";
+import { activityJson, notFound } from "@/lib/cf";
+import { getActorByUsername } from "@/lib/db";
 import { buildActor } from "@/lib/activitypub/utils";
+import { env } from "cloudflare:workers";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ username: string }> }) {
-  const { env } = getCloudflareContext();
   const { username } = await params;
   const domain = new URL(env.INSTANCE_URL).hostname;
 

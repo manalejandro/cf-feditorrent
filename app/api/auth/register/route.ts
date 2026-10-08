@@ -1,10 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getCloudflareContext, json, badRequest } from "@/lib/cf";
-import { hashPassword, createSessionToken } from "@/lib/auth";
+import { NextRequest } from "next/server";
+import { json, badRequest } from "@/lib/cf";
+import { hashPassword } from "@/lib/auth";
 import { generateKeyPair } from "@/lib/activitypub/security";
-import { generateId, actorIRI } from "@/lib/activitypub/utils";
+import { actorIRI } from "@/lib/activitypub/utils";
 import { getActorByUsername, getActorByEmail, createActor, setEmailVerificationToken } from "@/lib/db";
 import { sendVerificationEmail } from "@/lib/email";
+import { env } from "cloudflare:workers";
 
 async function verifyTurnstile(token: string, secret: string): Promise<boolean> {
   try {
@@ -13,7 +14,7 @@ async function verifyTurnstile(token: string, secret: string): Promise<boolean> 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ secret, response: token }),
     });
-    const data: any = await res.json();
+    const data = await res.json() as { success?: boolean };
     return data.success === true;
   } catch {
     return false;
@@ -22,7 +23,6 @@ async function verifyTurnstile(token: string, secret: string): Promise<boolean> 
 
 export async function POST(request: NextRequest) {
   try {
-    const { env } = getCloudflareContext();
     const { username, email, password, confirmPassword, turnstileToken } = await request.json() as { username?: string; email?: string; password?: string; confirmPassword?: string; turnstileToken?: string };
 
     if (!username || !email || !password || !confirmPassword) {

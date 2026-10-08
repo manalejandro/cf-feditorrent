@@ -1,5 +1,4 @@
-import { getCloudflareContext } from "@/lib/cf";
-
+import { env } from "cloudflare:workers";
 function hexFromRawQuery(param: string): string {
   let hex = "";
   for (let i = 0; i < param.length; i++) {
@@ -14,7 +13,6 @@ function hexFromRawQuery(param: string): string {
 }
 
 export async function GET(request: Request) {
-  const { env } = getCloudflareContext();
   const rawUrl = request.url;
   const m = rawUrl.match(/[?&]info_hash=([^&]+)/);
 

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useLocale } from "@/lib/i18n/client";
+import Link from "next/link";
 
 interface Notification {
   id: string;
@@ -37,6 +38,7 @@ export default function NotificationsPage() {
     finally { setLoading(false); }
   };
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load the notification list on mount
   useEffect(() => { fetchNotifications(); }, []);
 
   const markRead = async (id: string) => {
@@ -55,12 +57,12 @@ export default function NotificationsPage() {
     <div className="min-h-screen flex flex-col">
       <nav className="sticky top-0 z-50 backdrop-blur-xl bg-background/80 border-b border-border">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <a href="/" className="flex items-center gap-2.5 group">
+          <Link href="/" className="flex items-center gap-2.5 group">
             <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-sm group-hover:scale-105 transition-transform">F</div>
             <span className="font-semibold text-lg">FediTorrent</span>
-          </a>
+          </Link>
           <div className="flex items-center gap-3">
-            <a href="/" className="text-sm text-muted hover:text-foreground transition-colors">{d.nav.home}</a>
+            <Link href="/" className="text-sm text-muted hover:text-foreground transition-colors">{d.nav.home}</Link>
             <button onClick={() => setLocale(locale === "en" ? "es" : "en")}
               className="px-3 py-1.5 rounded-lg bg-card border border-border text-sm font-medium text-muted hover:text-foreground transition-colors">
               {locale === "en" ? "ES" : "EN"}

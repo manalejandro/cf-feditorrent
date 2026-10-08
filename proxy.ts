@@ -22,7 +22,7 @@ function isAPRequest(request: NextRequest): boolean {
   return AP_TYPES.some((t) => accept.includes(t));
 }
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname, searchParams } = request.nextUrl;
   const method = request.method;
 
@@ -97,6 +97,3 @@ export function middleware(request: NextRequest) {
   return response;
 }
 
-export const config = {
-  matcher: ["/users/:path*", "/api/:path*", "/nodeinfo/:path*", "/@:username", "/@:username/:path*", "/inbox"],
-};

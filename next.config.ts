@@ -1,12 +1,6 @@
-import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 import type { NextConfig } from "next";
 
-initOpenNextCloudflareForDev();
-
 const nextConfig: NextConfig = {
-  outputFileTracingExcludes: {
-    "**/*": [".next/cache/webpack-client-development/", ".next/cache/webpack-server-development/"],
-  },
   experimental: {
     serverActions: { allowedOrigins: ["*"] },
   },

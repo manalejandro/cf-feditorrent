@@ -1,13 +1,14 @@
 import { NextRequest } from "next/server";
-import { getCloudflareContext, json, badRequest, unauthorized } from "@/lib/cf";
+import { json, badRequest, unauthorized } from "@/lib/cf";
 import { getSessionActor } from "@/lib/auth";
 import { generateId, buildFollow, activityIRI } from "@/lib/activitypub/utils";
-import { getActorById, getFollow, createFollow, createActivity, getFollowerIds, updateActorCounts } from "@/lib/db";
+import { getActorById, getFollow, createFollow, createActivity, updateActorCounts } from "@/lib/db";
 import { deliverToInbox } from "@/lib/activitypub/federation";
 import { fetchRemoteObject } from "@/lib/activitypub/federation";
+import { env } from "cloudflare:workers";
+import type { APActor } from "@/lib/types";
 
 export async function GET(request: NextRequest) {
-  const { env } = getCloudflareContext();
   const auth = request.headers.get("authorization")?.replace("Bearer ", "");
   if (!auth) return unauthorized();
   const session = await getSessionActor(env.DB, auth);
@@ -21,7 +22,6 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { env } = getCloudflareContext();
   const auth = request.headers.get("authorization")?.replace("Bearer ", "");
   if (!auth) return unauthorized();
   const session = await getSessionActor(env.DB, auth);
@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
   let targetActor = await getActorById(env.DB, targetId);
 
   if (!targetActor) {
-    const fetched = await fetchRemoteObject(targetId) as any;
+    const fetched = await fetchRemoteObject(targetId) as APActor | null;
     if (!fetched?.publicKey?.publicKeyPem) return badRequest("Could not resolve remote actor");
     const domain = new URL(fetched.id).hostname;
     await env.DB

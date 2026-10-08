@@ -1,5 +1,5 @@
 import { type NextRequest } from "next/server";
-import { getCloudflareContext, json, badRequest, unauthorized } from "@/lib/cf";
+import { json, badRequest, unauthorized } from "@/lib/cf";
 import { getSessionActor } from "@/lib/auth";
 import { generateId, objectIRI, activityIRI, buildTorrentNote, buildCreate, followersIRI } from "@/lib/activitypub/utils";
 import { createTorrent, createObject, createActivity, getActorById, updateActorCounts, getFollowerIds } from "@/lib/db";
@@ -7,11 +7,11 @@ import { enqueueDeliveries } from "@/lib/activitypub/queue";
 import { collectFollowerInboxes } from "@/lib/activitypub/federation";
 import { PUBLIC_ADDRESS } from "@/lib/activitypub/vocab";
 import { computeTorrentInfo, buildMagnetUri, buildTorrentFile } from "@/lib/torrent/info";
+import { env } from "cloudflare:workers";
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
 
 export async function POST(request: NextRequest) {
-  const { env } = getCloudflareContext();
   const auth = request.headers.get("authorization")?.replace("Bearer ", "");
   if (!auth) return unauthorized();
   const session = await getSessionActor(env.DB, auth);

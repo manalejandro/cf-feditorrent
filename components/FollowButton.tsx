@@ -10,6 +10,7 @@ export function FollowButton({ targetId, targetUsername }: { targetId: string; t
   useEffect(() => {
     const username = localStorage.getItem("ft_username");
     if (username === targetUsername) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- stop the auth check for the viewer's own profile
       setChecking(false);
       return;
     }
@@ -19,7 +20,7 @@ export function FollowButton({ targetId, targetUsername }: { targetId: string; t
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
-      .then((data: any) => setFollowing(data.following))
+      .then((data) => setFollowing(Boolean((data as { following?: boolean }).following)))
       .catch(() => {})
       .finally(() => setChecking(false));
   }, [targetId, targetUsername]);

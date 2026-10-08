@@ -1,14 +1,13 @@
 import { NextRequest } from "next/server";
-import { getCloudflareContext, json } from "@/lib/cf";
+import { json } from "@/lib/cf";
 import { getActorByUsernameAndDomain } from "@/lib/db";
+import { env } from "cloudflare:workers";
 
 export async function GET(request: NextRequest) {
-  const { env } = getCloudflareContext();
   const resource = request.nextUrl.searchParams.get("resource");
 
   if (!resource) return json({ error: "Missing resource" }, 400);
 
-  const domain = new URL(env.INSTANCE_URL).hostname;
   const acctMatch = resource.match(/^acct:(.+)@(.+)$/);
   const urlMatch = resource.match(/^https?:\/\/.+/);
 

@@ -1,8 +1,21 @@
+interface TrackerEnv {
+  TORRENTS_KV: KVNamespace;
+}
+
+interface TrackerMessage {
+  action?: string;
+  to_peer_id?: string | null;
+  info_hash?: string;
+  peer_id?: string;
+  offers?: { offer?: unknown; offer_id?: unknown }[];
+  [key: string]: unknown;
+}
+
 export class TrackerDO {
   state: DurableObjectState;
-  env: any;
+  env: TrackerEnv;
 
-  constructor(state: DurableObjectState, env: any) {
+  constructor(state: DurableObjectState, env: TrackerEnv) {
     this.state = state;
     this.env = env;
   }
@@ -24,9 +37,9 @@ export class TrackerDO {
   }
 
   async webSocketMessage(ws: WebSocket, message: string) {
-    let msg: any;
+    let msg: TrackerMessage;
     try {
-      msg = JSON.parse(message);
+      msg = JSON.parse(message) as TrackerMessage;
     } catch {
       ws.send(JSON.stringify({ failure_reason: "Invalid JSON" }));
       return;
@@ -41,10 +54,10 @@ export class TrackerDO {
     }
   }
 
-  webSocketClose(ws: WebSocket) {}
-  webSocketError(ws: WebSocket) {}
+  webSocketClose(_ws: WebSocket) {}
+  webSocketError(_ws: WebSocket) {}
 
-  async handleAnnounce(ws: WebSocket, msg: any) {
+  async handleAnnounce(ws: WebSocket, msg: TrackerMessage) {
     const infoHash = msg.info_hash;
     const peerId = msg.peer_id;
 
@@ -75,7 +88,7 @@ export class TrackerDO {
     }));
 
     const offers = Array.isArray(msg.offers) ? msg.offers : [];
-    offers.forEach((offerObj: any, i: number) => {
+    offers.forEach((offerObj, i: number) => {
       const target = others[i];
       if (!target) return;
       target.send(JSON.stringify({
@@ -88,7 +101,7 @@ export class TrackerDO {
     });
   }
 
-  forwardAnswer(ws: WebSocket, msg: any) {
+  forwardAnswer(ws: WebSocket, msg: TrackerMessage) {
     const toPeerId = msg.to_peer_id;
     const infoHash = msg.info_hash;
     if (!toPeerId || !infoHash) return;

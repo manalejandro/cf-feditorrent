@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useLocale } from "@/lib/i18n/client";
+import Link from "next/link";
 
 interface Torrent {
   id: string;
@@ -25,6 +26,7 @@ export default function TorrentsPage() {
 
   useEffect(() => {
     const token = localStorage.getItem("ft_token");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag for the initial fetch
     if (!token) { setLoading(false); return; }
     fetch("/api/torrents", { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => r.json())
@@ -37,12 +39,12 @@ export default function TorrentsPage() {
     <div className="min-h-screen flex flex-col">
       <nav className="sticky top-0 z-50 backdrop-blur-xl bg-background/80 border-b border-border">
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
-          <a href="/" className="flex items-center gap-2.5 group">
+          <Link href="/" className="flex items-center gap-2.5 group">
             <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-sm group-hover:scale-105 transition-transform">F</div>
             <span className="font-semibold text-lg">FediTorrent</span>
-          </a>
+          </Link>
           <div className="flex items-center gap-3">
-            <a href="/" className="text-sm text-muted hover:text-foreground transition-colors">{d.nav.home}</a>
+            <Link href="/" className="text-sm text-muted hover:text-foreground transition-colors">{d.nav.home}</Link>
             <button onClick={() => setLocale(locale === "en" ? "es" : "en")}
               className="px-3 py-1.5 rounded-lg bg-card border border-border text-sm font-medium text-muted hover:text-foreground transition-colors">
               {locale === "en" ? "ES" : "EN"}
@@ -54,7 +56,7 @@ export default function TorrentsPage() {
       <main className="flex-1 max-w-4xl mx-auto px-4 py-12 w-full">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-3xl font-bold">{d.nav.myTorrents}</h1>
-          <a href="/#create" className="px-5 py-2.5 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors">+ {d.torrent.create}</a>
+          <Link href="/#create" className="px-5 py-2.5 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors">+ {d.torrent.create}</Link>
         </div>
 
         {loading ? (

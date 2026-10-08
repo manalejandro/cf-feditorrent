@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server";
-import { getCloudflareContext, json, unauthorized, notFound } from "@/lib/cf";
+import { json, unauthorized, notFound } from "@/lib/cf";
 import { getSessionActor } from "@/lib/auth";
 import { generateId, buildDelete, activityIRI } from "@/lib/activitypub/utils";
 import { getTorrentById, deleteTorrent, deleteObject, createActivity, getFollowerIds, getActorById, updateActorCounts } from "@/lib/db";
 import { enqueueDeliveries } from "@/lib/activitypub/queue";
 import { collectFollowerInboxes } from "@/lib/activitypub/federation";
 import { PUBLIC_ADDRESS } from "@/lib/activitypub/vocab";
+import { env } from "cloudflare:workers";
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { env } = getCloudflareContext();
   const auth = request.headers.get("authorization")?.replace("Bearer ", "");
   if (!auth) return unauthorized();
   const session = await getSessionActor(env.DB, auth);

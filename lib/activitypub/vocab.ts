@@ -27,6 +27,12 @@ export const DEFAULT_CONTEXT = [
     Hashtag: "as:Hashtag",
     Emoji: "toot:Emoji",
     focalPoint: { "@container": "@list", "@id": "toot:focalPoint" },
+    // Mastodon's `gts:` interaction policy (FEP-044f quote policy terms).
+    gts: "https://gotosocial.org/ns#",
+    interactionPolicy: { "@id": "gts:interactionPolicy", "@type": "@id" },
+    canQuote: { "@id": "gts:canQuote", "@type": "@id" },
+    automaticApproval: { "@id": "gts:automaticApproval", "@type": "@id" },
+    manualApproval: { "@id": "gts:manualApproval", "@type": "@id" },
     xsd: "http://www.w3.org/2001/XMLSchema#",
     Torrent: "https://feditorrent.com/ns#Torrent",
     torrentInfoHash: { "@id": "https://feditorrent.com/ns#torrentInfoHash", "@type": "xsd:string" },

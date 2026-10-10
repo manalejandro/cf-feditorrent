@@ -1,5 +1,6 @@
 export interface APObject {
-  "@context"?: string | string[] | Record<string, unknown>;
+  /** JSON-LD context: a URL, an object, or an array mixing both. */
+  "@context"?: string | (string | Record<string, unknown>)[] | Record<string, unknown>;
   id: string;
   type: string;
   [key: string]: unknown;
@@ -8,6 +9,8 @@ export interface APObject {
 export interface APActor extends APObject {
   type: "Person" | "Service" | "Group" | "Organization" | "Application";
   preferredUsername: string;
+  /** `user@domain` handle (Mastodon's ActorSerializer includes it). */
+  webfinger?: string;
   name?: string;
   summary?: string;
   url?: string;
@@ -83,6 +86,8 @@ export interface APCollection extends APObject {
   type: "Collection" | "OrderedCollection";
   totalItems?: number;
   first?: string | APCollectionPage;
+  /** Mastodon's outbox collection carries a `last` link (oldest page). */
+  last?: string;
   items?: (string | APObject)[];
 }
 

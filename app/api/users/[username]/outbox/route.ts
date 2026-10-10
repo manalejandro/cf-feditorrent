@@ -20,8 +20,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const torrents = await getTorrentsByActor(env.DB, actor.id);
 
   if (page) {
+    // `?page=true&min_id=0` is Mastodon's "last page" link: the oldest
+    // torrents (the list is newest-first, so the tail is the oldest page).
+    const oldestPage = page === "true" && request.nextUrl.searchParams.get("min_id") === "0";
+    const selected = oldestPage ? torrents.slice(-20).reverse() : torrents.slice(0, 20);
     const items = await Promise.all(
-      torrents.slice(0, 20).map(async (t) => {
+      selected.map(async (t) => {
         if (t.objectId) {
           const obj = await getObjectById(env.DB, t.objectId);
           if (obj) {
@@ -50,6 +54,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     return activityJson(pageResponse);
   }
 
-  const collection = buildOrderedCollection(outboxId, torrents.length);
+  const collection = buildOrderedCollection(outboxId, torrents.length, `${outboxId}?page=true&min_id=0`);
   return activityJson(collection);
 }

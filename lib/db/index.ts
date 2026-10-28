@@ -117,9 +117,12 @@ export async function getActorByEmail(db: D1Database, email: string): Promise<Lo
 }
 
 export async function searchActors(db: D1Database, query: string, limit = 20): Promise<LocalActor[]> {
+  const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(Math.trunc(limit), 1), 40) : 20;
+  // Escape LIKE wildcards so user input cannot act as a wildcard pattern.
+  const escaped = query.toLowerCase().replace(/[\\%_]/g, (m) => `\\${m}`);
   const { results } = await db
-    .prepare("SELECT * FROM actors WHERE (LOWER(username) LIKE ? OR LOWER(display_name) LIKE ?) ORDER BY is_local DESC, followers_count DESC LIMIT ?")
-    .bind(`%${query.toLowerCase()}%`, `%${query.toLowerCase()}%`, limit)
+    .prepare("SELECT * FROM actors WHERE (LOWER(username) LIKE ? ESCAPE '\\' OR LOWER(display_name) LIKE ? ESCAPE '\\') ORDER BY is_local DESC, followers_count DESC LIMIT ?")
+    .bind(`%${escaped}%`, `%${escaped}%`, safeLimit)
     .all<Row>();
   return results.map(rowToActor);
 }
@@ -202,6 +205,22 @@ export async function updateActorCounts(
     .run();
 }
 
+/**
+ * Atomically bump a counter (race-free, clamped at 0). Prefer this over
+ * read-modify-write with `updateActorCounts` for +/- 1 transitions.
+ */
+export async function bumpActorCount(
+  db: D1Database,
+  id: string,
+  field: "followers_count" | "following_count" | "torrents_count",
+  delta: number
+): Promise<void> {
+  await db
+    .prepare(`UPDATE actors SET ${field} = MAX(0, ${field} + ?), updated_at = datetime('now') WHERE id = ?`)
+    .bind(delta, id)
+    .run();
+}
+
 export async function setEmailVerificationToken(db: D1Database, actorId: string, token: string): Promise<void> {
   await db
     .prepare("UPDATE actors SET email_verification_token = ?, email_verification_sent_at = datetime('now') WHERE id = ?")
@@ -211,7 +230,7 @@ export async function setEmailVerificationToken(db: D1Database, actorId: string,
 
 export async function verifyEmailByToken(db: D1Database, token: string): Promise<string | null> {
   const row = await db
-    .prepare("SELECT id FROM actors WHERE email_verification_token = ? AND email_verified = 0")
+    .prepare("SELECT id FROM actors WHERE email_verification_token = ? AND email_verified = 0 AND email_verification_sent_at > datetime('now', '-1 day')")
     .bind(token)
     .first() as { id: string } | null;
   if (!row) return null;
@@ -259,6 +278,8 @@ export async function updateActorPassword(db: D1Database, actorId: string, passw
     .prepare("UPDATE actors SET password_hash = ?, password_reset_token = NULL, password_reset_expires_at = NULL, updated_at = datetime('now') WHERE id = ?")
     .bind(passwordHash, actorId)
     .run();
+  // A password reset must revoke every existing session (compromise response).
+  await db.prepare("DELETE FROM sessions WHERE actor_id = ?").bind(actorId).run();
 }
 
 export async function clearPasswordResetToken(db: D1Database, actorId: string): Promise<void> {
@@ -345,17 +366,21 @@ export async function getTorrentById(db: D1Database, id: string): Promise<LocalT
   return row ? rowToTorrent(row) : null;
 }
 
-export async function deleteTorrent(db: D1Database, id: string): Promise<void> {
-  await db.prepare("DELETE FROM torrents WHERE id = ?").bind(id).run();
+export async function getTorrentByObjectId(db: D1Database, objectId: string): Promise<LocalTorrent | null> {
+  const row = await db.prepare("SELECT * FROM torrents WHERE object_id = ?").bind(objectId).first();
+  return row ? rowToTorrent(row) : null;
 }
 
-export async function getAllTorrents(db: D1Database, limit = 50, offset = 0): Promise<LocalTorrent[]> {
-  const { results } = await db
-    .prepare("SELECT t.*, a.username as actor_username, a.domain as actor_domain FROM torrents t JOIN actors a ON a.id = t.actor_id ORDER BY t.published DESC LIMIT ? OFFSET ?")
-    .bind(limit, offset)
-    .all<Row>();
-  // @ts-expect-error - returning joined results
-  return results;
+export async function countTorrentsByActor(db: D1Database, actorId: string): Promise<number> {
+  const row = await db
+    .prepare("SELECT COUNT(*) as count FROM torrents WHERE actor_id = ?")
+    .bind(actorId)
+    .first() as { count: number } | null;
+  return row?.count ?? 0;
+}
+
+export async function deleteTorrent(db: D1Database, id: string): Promise<void> {
+  await db.prepare("DELETE FROM torrents WHERE id = ?").bind(id).run();
 }
 
 // ── Objects ─────────────────────────────────────────────────────────────────
@@ -555,8 +580,12 @@ export async function createNotification(
     .run();
 }
 
-export async function markNotificationRead(db: D1Database, id: string): Promise<void> {
-  await db.prepare("UPDATE notifications SET is_read = 1 WHERE id = ?").bind(id).run();
+export async function markNotificationRead(db: D1Database, id: string, targetAccountId: string): Promise<void> {
+  // Scoped to the owner: prevents marking other users' notifications as read.
+  await db
+    .prepare("UPDATE notifications SET is_read = 1 WHERE id = ? AND target_account_id = ?")
+    .bind(id, targetAccountId)
+    .run();
 }
 
 export async function getUnreadNotificationCount(db: D1Database, targetAccountId: string): Promise<number> {

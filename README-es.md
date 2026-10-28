@@ -17,7 +17,7 @@ Comparte torrents, enlaces magnet y archivos WebTorrent a través del fediverso.
 ## Tecnologías
 
 - **Framework:** Next.js 16 (React 19)
-- **Despliegue:** Cloudflare Workers vía OpenNext
+- **Despliegue:** Cloudflare Workers vía vinext (`vinext-cloudflare deploy`)
 - **Base de datos:** Cloudflare D1 (SQLite)
 - **Cola:** Cloudflare Workers Queues (entrega ActivityPub)
 - **Almacenamiento:** Cloudflare KV (tokens de autenticación de torrents)
@@ -97,7 +97,7 @@ npm run deploy
 │   ├── tracker-do.ts      # Durable Object tracker BitTorrent
 │   └── worker.ts          # Cloudflare Worker + consumidor de cola
 ├── wrangler.toml          # Configuración de Cloudflare
-└── middleware.ts          # CORS, cabeceras de seguridad, reescrituras de URL
+└── proxy.ts               # CORS, cabeceras de seguridad, reescrituras de URL (middleware de Next.js 16)
 ```
 
 ## Endpoints de API
@@ -131,7 +131,7 @@ npm run deploy
 ### Tracker
 - `POST /api/tracker/authenticate` — Autenticar torrent para compartir
 - `GET /api/tracker/validate` — Validar token de torrent
-- `WS /ws` — Tracker WebSocket (Durable Object)
+- `WS /api/tracker/announce` — Tracker WebSocket (Durable Object, protocolo bittorrent-tracker usado por WebTorrent)
 
 ### API Mastodon
 - `GET /api/v1/instance` — Información de la instancia

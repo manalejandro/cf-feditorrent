@@ -14,13 +14,18 @@ const MAX_BODY_BYTES = 1_000_000;
 export async function POST(request: NextRequest) {
   const baseUrl = env.INSTANCE_URL;
 
+  const contentLength = Number(request.headers.get("content-length") || 0);
+  if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+    return json({ error: "Payload too large" }, 413);
+  }
   let rawBody: string;
   try {
     rawBody = await request.text();
   } catch {
     return json({ error: "Could not read request body" }, 400);
   }
-  if (rawBody.length > MAX_BODY_BYTES) {
+  // Measure BYTES, not UTF-16 code units (multi-byte payloads can be ~4x larger).
+  if (new TextEncoder().encode(rawBody).byteLength > MAX_BODY_BYTES) {
     return json({ error: "Payload too large" }, 413);
   }
 
@@ -44,7 +49,7 @@ export async function POST(request: NextRequest) {
   let signingKey: { id: string; privateKeyPem: string } | undefined;
   try {
     const localRow = await env.DB
-      .prepare("SELECT id, private_key_pem FROM actors WHERE is_local = 1 AND private_key_pem IS NOT NULL LIMIT 1")
+      .prepare("SELECT id, private_key_pem FROM actors WHERE is_local = 1 AND private_key_pem IS NOT NULL ORDER BY created_at ASC LIMIT 1")
       .first<{ id: string; private_key_pem: string }>();
     if (localRow?.private_key_pem) {
       signingKey = { id: localRow.id, privateKeyPem: localRow.private_key_pem };
@@ -120,11 +125,13 @@ export async function POST(request: NextRequest) {
       baseUrl,
       signingActorId,
       signingKey,
+      queue: env.DELIVERY_QUEUE,
       ...(recipient?.privateKeyPem
         ? { recipient: { id: recipient.id, username: recipient.username, privateKeyPem: recipient.privateKeyPem } }
         : {}),
     });
-  } catch {
+  } catch (err) {
+    console.error("[inbox] processInboxActivity failed:", err);
     // Still return 202 so the remote server does not keep retrying.
   }
 

@@ -17,7 +17,7 @@ Share torrents, magnet links, and WebTorrent files across the fediverse. Built w
 ## Tech Stack
 
 - **Framework:** Next.js 16 (React 19)
-- **Deployment:** Cloudflare Workers via OpenNext
+- **Deployment:** Cloudflare Workers via vinext (`vinext-cloudflare deploy`)
 - **Database:** Cloudflare D1 (SQLite)
 - **Queue:** Cloudflare Workers Queues (ActivityPub delivery)
 - **Storage:** Cloudflare KV (torrent authentication tokens)
@@ -59,6 +59,11 @@ npx wrangler secret put SECRET_KEY
 npx wrangler secret put TURNSTILE_SECRET_KEY
 ```
 
+> **Email:** the `send_email` binding requires the Workers Paid plan to send to
+> arbitrary destination addresses. Without it, verification/reset emails are
+> silently dropped (delivery failures are logged). Make sure `EMAIL_FROM`
+> (`noreply@feditorrent.com`) is a verified address in your Cloudflare account.
+
 ### Development
 
 ```bash
@@ -99,7 +104,7 @@ npm run deploy
 │   ├── tracker-do.ts      # Durable Object BitTorrent tracker
 │   └── worker.ts          # Cloudflare Worker + Queue consumer
 ├── wrangler.toml          # Cloudflare configuration
-└── middleware.ts          # CORS, security headers, URL rewrites
+└── proxy.ts               # CORS, security headers, URL rewrites (Next.js 16 middleware)
 ```
 
 ## API Endpoints
@@ -133,7 +138,7 @@ npm run deploy
 ### Tracker
 - `POST /api/tracker/authenticate` — Authenticate torrent for seeding
 - `GET /api/tracker/validate` — Validate torrent token
-- `WS /ws` — WebSocket tracker (Durable Object)
+- `WS /api/tracker/announce` — WebSocket tracker (Durable Object, bittorrent-tracker protocol used by WebTorrent)
 
 ### Mastodon API
 - `GET /api/v1/instance` — Instance info

@@ -1,9 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  experimental: {
-    serverActions: { allowedOrigins: ["*"] },
-  },
   async rewrites() {
     return [
       { source: "/@:username", destination: "/users/:username" },

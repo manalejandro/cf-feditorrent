@@ -2,11 +2,12 @@ import { NextRequest } from "next/server";
 import { json, unauthorized, notFound } from "@/lib/cf";
 import { getSessionActor } from "@/lib/auth";
 import { generateId, buildDelete, activityIRI } from "@/lib/activitypub/utils";
-import { getTorrentById, deleteTorrent, deleteObject, createActivity, getFollowerIds, getActorById, updateActorCounts } from "@/lib/db";
+import { getTorrentById, deleteTorrent, deleteObject, createActivity, getFollowerIds, getActorById, bumpActorCount } from "@/lib/db";
 import { enqueueDeliveries } from "@/lib/activitypub/queue";
 import { collectFollowerInboxes } from "@/lib/activitypub/federation";
 import { PUBLIC_ADDRESS } from "@/lib/activitypub/vocab";
 import { env } from "cloudflare:workers";
+
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = request.headers.get("authorization")?.replace("Bearer ", "");
   if (!auth) return unauthorized();
@@ -16,7 +17,10 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { id } = await params;
   const torrent = await getTorrentById(env.DB, id);
   if (!torrent) return notFound("Torrent not found");
-  if (torrent.actorId !== session.id) return unauthorized();
+  if (torrent.actorId !== session.id) {
+    // 403 (not 401): the caller IS authenticated, just not the owner.
+    return json({ error: "Forbidden" }, 403);
+  }
 
   const baseUrl = env.INSTANCE_URL;
 
@@ -40,7 +44,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
       if (actor?.privateKeyPem) {
         const followerIds = await getFollowerIds(env.DB, session.id);
         if (followerIds.length > 0) {
-          const fetchActorFn = async (id: string) => getActorById(env.DB, id);
+          const fetchActorFn = async (actorId: string) => getActorById(env.DB, actorId);
           const inboxes = await collectFollowerInboxes(followerIds, fetchActorFn);
           if (inboxes.length > 0) {
             await enqueueDeliveries(
@@ -63,10 +67,29 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
   await deleteTorrent(env.DB, id);
 
-  const actor = await getActorById(env.DB, session.id);
-  if (actor) {
-    await updateActorCounts(env.DB, session.id, { torrentsCount: Math.max(0, (actor.torrentsCount ?? 0) - 1) });
+  // Clean up stored artifacts: R2 files and the tracker KV token. Without this
+  // the "deleted" file stayed publicly downloadable and R2 accumulated garbage.
+  if (torrent.infoHash && /^[0-9a-f]{40}$/i.test(torrent.infoHash)) {
+    try {
+      const prefix = `torrents/${torrent.infoHash}/`;
+      let cursor: string | undefined;
+      do {
+        const listed = await env.FILES.list({ prefix, cursor, limit: 1000 });
+        const keys = listed.objects.map((o) => o.key);
+        if (keys.length > 0) await env.FILES.delete(keys);
+        cursor = listed.truncated ? listed.cursor : undefined;
+      } while (cursor);
+    } catch (err) {
+      console.error("[torrents] R2 cleanup error:", err);
+    }
+    try {
+      await env.TORRENTS_KV.delete(torrent.infoHash);
+    } catch (err) {
+      console.error("[torrents] KV cleanup error:", err);
+    }
   }
+
+  await bumpActorCount(env.DB, session.id, "torrents_count", -1);
 
   return json({ deleted: true });
 }

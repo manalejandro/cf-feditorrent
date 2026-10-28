@@ -13,11 +13,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const accept = request.headers.get("accept") ?? "";
   if (!accept.includes("application/activity+json") && !accept.includes("application/ld+json")) {
-    return NextResponse.redirect(new URL(`/@${username}`, request.url));
+    return NextResponse.redirect(new URL(`/@${actor.username}`, request.url));
   }
 
-  const apActor = buildActor(env.INSTANCE_URL, username, {
-    displayName: actor.displayName ?? username,
+  const apActor = buildActor(env.INSTANCE_URL, actor.username, {
+    displayName: actor.displayName ?? actor.username,
     summary: actor.summary ?? "",
     avatarUrl: actor.avatarUrl,
     headerUrl: actor.headerUrl,
@@ -25,11 +25,19 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     followersCount: actor.followersCount,
     followingCount: actor.followingCount,
     torrentsCount: actor.torrentsCount,
-    published: actor.createdAt,
+    // Actor `published` must be xsd:dateTime; SQLite stores "YYYY-MM-DD HH:MM:SS".
+    published: toIsoDate(actor.createdAt),
     fields: [
       { name: "Torrents", value: String(actor.torrentsCount ?? 0) },
     ],
   });
 
   return activityJson(apActor);
+}
+
+/** Convert a SQLite datetime string to ISO-8601 (pass through if already ISO). */
+function toIsoDate(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  if (value.includes("T")) return value;
+  return `${value.replace(" ", "T")}Z`;
 }

@@ -11,6 +11,6 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!session) return unauthorized();
 
   const { id } = await params;
-  await markNotificationRead(env.DB, id);
+  await markNotificationRead(env.DB, id, session.id);
   return json({ ok: true });
 }

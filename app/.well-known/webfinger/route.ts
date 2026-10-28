@@ -25,8 +25,18 @@ export async function GET(request: NextRequest) {
 
   if (!username || !actorDomain) return json({ error: "Invalid resource" }, 400);
 
+  // WebFinger only answers for THIS instance: cached remote actors must not be
+  // re-exported with local self links (federated discovery poisoning).
+  let localHostname = "";
+  try {
+    localHostname = new URL(env.INSTANCE_URL).hostname.toLowerCase();
+  } catch { /* handled below */ }
+  if (!localHostname || actorDomain.toLowerCase() !== localHostname) {
+    return json({ error: "Not found" }, 404);
+  }
+
   const actor = await getActorByUsernameAndDomain(env.DB, username, actorDomain);
-  if (!actor) return json({ error: "Not found" }, 404);
+  if (!actor || !actor.isLocal) return json({ error: "Not found" }, 404);
 
   const actorUrl = `${env.INSTANCE_URL}/users/${username.toLowerCase()}`;
   const profileUrl = `${env.INSTANCE_URL}/@${username.toLowerCase()}`;

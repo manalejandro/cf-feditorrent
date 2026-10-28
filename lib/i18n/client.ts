@@ -19,7 +19,8 @@ export function useLocale(): [Locale, (l: Locale) => void, Dict] {
 
   const setLocale = (l: Locale) => {
     localStorage.setItem("ft_locale", l);
-    document.cookie = `ft_locale=${l};path=/;max-age=31536000;SameSite=Lax`;
+    const secure = typeof window !== "undefined" && window.location.protocol === "https:" ? ";Secure" : "";
+    document.cookie = `ft_locale=${l};path=/;max-age=31536000;SameSite=Lax${secure}`;
     setLocaleState(l);
   };
 

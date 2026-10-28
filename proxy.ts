@@ -13,6 +13,24 @@ const SECURITY_HEADERS: Record<string, string> = {
   "X-Frame-Options": "DENY",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
   "Referrer-Policy": "strict-origin-when-cross-origin",
+  // 'unsafe-inline' in script-src is required by Next.js SSR payloads; the
+  // rest locks down framing, plugins and base hijacking. connect-src keeps
+  // https:/wss: open because browser WebTorrent may talk to external trackers
+  // found in user-provided magnet URIs.
+  "Content-Security-Policy": [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' https: data: blob:",
+    "media-src 'self' blob:",
+    "connect-src 'self' https: wss:",
+    "frame-src https://challenges.cloudflare.com",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join("; "),
+  "Permissions-Policy": "geolocation=(), microphone=(), camera=(), payment=()",
 };
 
 const AP_TYPES = ["application/activity+json", "application/ld+json"];

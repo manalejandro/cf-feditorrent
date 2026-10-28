@@ -19,13 +19,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const recipient = await getActorByUsername(env.DB, username, domain);
   if (!recipient || !recipient.isLocal) return json({ error: "Not found" }, 404);
 
+  const contentLength = Number(request.headers.get("content-length") || 0);
+  if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+    return json({ error: "Payload too large" }, 413);
+  }
   let rawBody: string;
   try {
     rawBody = await request.text();
   } catch {
     return json({ error: "Could not read request body" }, 400);
   }
-  if (rawBody.length > MAX_BODY_BYTES) {
+  // Measure BYTES, not UTF-16 code units (multi-byte payloads can be ~4x larger).
+  if (new TextEncoder().encode(rawBody).byteLength > MAX_BODY_BYTES) {
     return json({ error: "Payload too large" }, 413);
   }
 
@@ -72,13 +77,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         baseUrl,
         signingActorId,
         signingKey,
+        queue: env.DELIVERY_QUEUE,
         recipient: {
           id: recipient.id,
           username: recipient.username,
           privateKeyPem: recipient.privateKeyPem,
         },
       });
-    } catch {
+    } catch (err) {
+      console.error("[inbox] processInboxActivity failed:", err);
       // Still return 202 so the remote server does not keep retrying.
     }
   }

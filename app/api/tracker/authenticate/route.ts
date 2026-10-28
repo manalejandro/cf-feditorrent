@@ -1,35 +1,51 @@
 import { NextRequest } from "next/server";
-import { json, badRequest } from "@/lib/cf";
+import { json, badRequest, unauthorized } from "@/lib/cf";
+import { getSessionActor } from "@/lib/auth";
+import { getTorrentByInfoHash } from "@/lib/db";
+import { createTrackerToken, MissingSecretError } from "@/lib/torrent/tracker-token";
 import { env } from "cloudflare:workers";
 
+/**
+ * Issue a tracker token for a torrent the caller owns (browser seeding).
+ * Previously unauthenticated: anyone could write arbitrary KV keys and exhaust
+ * the instance-wide quota.
+ */
 export async function POST(request: NextRequest) {
-  const body = await request.json().catch(() => ({})) as { infoHash?: string };
+  const auth = request.headers.get("authorization")?.replace("Bearer ", "");
+  if (!auth) return unauthorized();
+  const session = await getSessionActor(env.DB, auth);
+  if (!session) return unauthorized();
+
+  const body = (await request.json().catch(() => ({}))) as { infoHash?: string };
   const { infoHash } = body;
 
   if (!infoHash || typeof infoHash !== "string" || !/^[0-9a-f]{40}$/i.test(infoHash)) {
     return badRequest("infoHash requerido (40 hex chars)");
   }
+  const normalizedHash = infoHash.toLowerCase();
 
-  const MAX_TORRENTS = parseInt(env.MAX_TORRENTS || "100");
-  const EXPIRY_MINUTES = parseInt(env.TORRENT_EXPIRY_MINUTES || "30");
-  const SECRET_KEY = env.SECRET_KEY || "default-insecure-key";
-
-  const list = await env.TORRENTS_KV.list();
-  const currentCount = list.keys.length;
-
-  if (currentCount >= MAX_TORRENTS) {
-    return json({ error: "Maximum torrent limit reached", maxTorrents: MAX_TORRENTS, currentTorrents: currentCount }, 429);
+  const torrent = await getTorrentByInfoHash(env.DB, normalizedHash);
+  if (!torrent || torrent.actorId !== session.id) {
+    return json({ error: "Forbidden" }, 403);
   }
 
-  const timestamp = Date.now();
-  const data = `${infoHash}-${timestamp}`;
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(SECRET_KEY), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data));
-  const token = Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
-  const expiryMs = EXPIRY_MINUTES * 60 * 1000;
-  const expiresAt = timestamp + expiryMs;
+  if (!env.SECRET_KEY) {
+    console.error("[tracker/authenticate] SECRET_KEY is not configured");
+    return json({ error: "Tracker authentication is temporarily unavailable" }, 503);
+  }
 
-  await env.TORRENTS_KV.put(infoHash, JSON.stringify({ token, timestamp, infoHash }), { expirationTtl: EXPIRY_MINUTES * 60 });
-
-  return json({ token, expires: expiresAt, expiryMinutes: EXPIRY_MINUTES, currentTorrents: currentCount + 1, maxTorrents: MAX_TORRENTS });
+  try {
+    const { token, expiresAt, expiryMinutes } = await createTrackerToken(
+      env.TORRENTS_KV,
+      env,
+      normalizedHash
+    );
+    return json({ token, expires: expiresAt, expiryMinutes });
+  } catch (err) {
+    if (err instanceof MissingSecretError) {
+      return json({ error: "Tracker authentication is temporarily unavailable" }, 503);
+    }
+    console.error("[tracker/authenticate] Error:", err);
+    return json({ error: "Failed to authenticate torrent" }, 500);
+  }
 }

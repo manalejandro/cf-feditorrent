@@ -2,14 +2,39 @@ import { type NextRequest } from "next/server";
 import { json, badRequest, unauthorized } from "@/lib/cf";
 import { getSessionActor } from "@/lib/auth";
 import { generateId, objectIRI, activityIRI, buildTorrentNote, buildCreate, followersIRI } from "@/lib/activitypub/utils";
-import { createTorrent, createObject, createActivity, getActorById, updateActorCounts, getFollowerIds } from "@/lib/db";
+import {
+  createTorrent,
+  createObject,
+  createActivity,
+  getActorById,
+  bumpActorCount,
+  getFollowerIds,
+  countTorrentsByActor,
+} from "@/lib/db";
 import { enqueueDeliveries } from "@/lib/activitypub/queue";
 import { collectFollowerInboxes } from "@/lib/activitypub/federation";
 import { PUBLIC_ADDRESS } from "@/lib/activitypub/vocab";
 import { computeTorrentInfo, buildMagnetUri, buildTorrentFile } from "@/lib/torrent/info";
+import { createTrackerToken, MissingSecretError } from "@/lib/torrent/tracker-token";
 import { env } from "cloudflare:workers";
 
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+/**
+ * 25 MB: the route holds the file in memory (formData buffer + typed array
+ * copy + per-piece slices), and Worker isolates cap at ~128 MB — the previous
+ * 100 MB limit OOM'd well before the advertised maximum.
+ */
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
+
+/** Neutralize path separators, control chars and dot-prefixes in R2 keys. */
+function sanitizeFilename(name: string): string {
+  const base =
+    name
+      .replace(/[\u0000-\u001f\u007f]/g, "")
+      .split(/[\\/]/)
+      .pop() || "file";
+  const trimmed = base.replace(/^\.+/, "_").slice(0, 180);
+  return trimmed || "file";
+}
 
 export async function POST(request: NextRequest) {
   const auth = request.headers.get("authorization")?.replace("Bearer ", "");
@@ -20,15 +45,21 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
-    const name = (formData.get("name") as string) || file?.name || "File";
+    const name = ((formData.get("name") as string) || file?.name || "File").slice(0, 300);
     const description = (formData.get("description") as string) || null;
 
     if (!file) return badRequest("File is required");
-    if (file.size > MAX_FILE_SIZE) return badRequest("File too large (max 100MB)");
+    if (file.size > MAX_FILE_SIZE) return badRequest("File too large (max 25MB)");
     if (file.size === 0) return badRequest("Empty file");
 
+    const MAX_TORRENTS = Math.max(1, parseInt(env.MAX_TORRENTS || "100", 10) || 100);
+    const currentCount = await countTorrentsByActor(env.DB, session.id);
+    if (currentCount >= MAX_TORRENTS) {
+      return json({ error: "Maximum torrent limit reached" }, 429);
+    }
+
     const fileData = new Uint8Array(await file.arrayBuffer());
-    const filename = file.name;
+    const filename = sanitizeFilename(file.name);
 
     const { infoHash, pieces, pieceLength } = await computeTorrentInfo(fileData, filename);
 
@@ -52,20 +83,17 @@ export async function POST(request: NextRequest) {
       customMetadata: { filename: `${filename}.torrent`, infoHash },
     });
 
-    // Authorize in tracker KV
-    const MAX_TORRENTS = parseInt(env.MAX_TORRENTS || "100");
-    const EXPIRY_MINUTES = parseInt(env.TORRENT_EXPIRY_MINUTES || "30");
-    const SECRET_KEY = env.SECRET_KEY || "default-insecure-key";
-    const list = await env.TORRENTS_KV.list();
-    if (list.keys.length >= MAX_TORRENTS) {
-      return json({ error: "Maximum torrent limit reached" }, 429);
+    // Authorize in tracker KV (best-effort: announces are also gated by the
+    // D1 torrents row, so a missing SECRET_KEY does not break downloads).
+    try {
+      await createTrackerToken(env.TORRENTS_KV, env, infoHash);
+    } catch (err) {
+      if (err instanceof MissingSecretError) {
+        console.error("[upload] SECRET_KEY is not configured — tracker tokens disabled");
+      } else {
+        console.error("[upload] Tracker token error:", err);
+      }
     }
-    const timestamp = Date.now();
-    const data = `${infoHash}-${timestamp}`;
-    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(SECRET_KEY), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-    const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data));
-    const token = Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
-    await env.TORRENTS_KV.put(infoHash, JSON.stringify({ token, timestamp, infoHash }), { expirationTtl: EXPIRY_MINUTES * 60 });
 
     // Create D1 records
     const id = generateId();
@@ -93,20 +121,25 @@ export async function POST(request: NextRequest) {
       raw: JSON.stringify(note),
     });
 
-    await createTorrent(env.DB, {
-      id,
-      slug: id.slice(0, 8),
-      actorId: session.id,
-      name,
-      description: description ?? undefined,
-      infoHash,
-      magnetUri,
-      torrentFileUrl,
-      size: fileData.length,
-      fileCount: 1,
-      magnetOnly: false,
-      objectId: noteId,
-    });
+    try {
+      await createTorrent(env.DB, {
+        id,
+        slug: id.slice(0, 8),
+        actorId: session.id,
+        name,
+        description: description ?? undefined,
+        infoHash,
+        magnetUri,
+        torrentFileUrl,
+        size: fileData.length,
+        fileCount: 1,
+        magnetOnly: false,
+        objectId: noteId,
+      });
+    } catch (err) {
+      console.error("[upload] createTorrent conflict:", err);
+      return json({ error: "A torrent with this info hash or slug already exists" }, 409);
+    }
 
     const createId = generateId();
     const apCreateActivity = buildCreate(baseUrl, session.id, note, createId);
@@ -122,17 +155,14 @@ export async function POST(request: NextRequest) {
       isLocal: true,
     });
 
-    const actor = await getActorById(env.DB, session.id);
-    if (actor) {
-      await updateActorCounts(env.DB, session.id, { torrentsCount: (actor.torrentsCount ?? 0) + 1 });
-    }
+    await bumpActorCount(env.DB, session.id, "torrents_count", 1);
 
     try {
       const act = await getActorById(env.DB, session.id);
       if (act?.privateKeyPem) {
         const followerIds = await getFollowerIds(env.DB, session.id);
         if (followerIds.length > 0) {
-          const fetchActorFn = async (id: string) => getActorById(env.DB, id);
+          const fetchActorFn = async (actorId: string) => getActorById(env.DB, actorId);
           const inboxes = await collectFollowerInboxes(followerIds, fetchActorFn);
           if (inboxes.length > 0) {
             await enqueueDeliveries(

@@ -12,6 +12,7 @@ import type { APActor } from "@/lib/types";
 import { getActorById } from "@/lib/db";
 import { fetchRemoteObject } from "./federation";
 import { verifySignature } from "./security";
+import { env } from "cloudflare:workers";
 
 export interface LocalSigningKey {
   id: string;
@@ -67,13 +68,49 @@ function publicKeyPemFor(actor: APActor, keyId: string): string | null {
   return typeof pem === "string" && pem.length > 0 ? pem : null;
 }
 
-/** Persist a fetched remote actor so later deliveries verify without a fetch. */
+/** Hostname of this instance, used to reject remote docs claiming local ids. */
+function localHostname(): string {
+  try {
+    return new URL(env.INSTANCE_URL).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/** True when the given actor id belongs to this instance's domain. */
+export function isLocalActorId(actorId: string): boolean {
+  const local = localHostname();
+  if (!local) return false;
+  try {
+    return new URL(actorId).hostname.toLowerCase() === local;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Persist a fetched remote actor so later deliveries verify without a fetch.
+ *
+ * Safety rules (a remote server controls the document contents):
+ * - documents claiming a LOCAL actor id are rejected outright — otherwise a
+ *   malicious server could overwrite (or via INSERT OR REPLACE destroy) a
+ *   local account, its keys and credentials;
+ * - local rows are never updated (`WHERE actors.is_local = 0`);
+ * - an empty public key never replaces a previously cached valid key.
+ */
 export async function cacheRemoteActor(db: D1Database, actor: APActor): Promise<void> {
+  if (!actor?.id || typeof actor.id !== "string") return;
+  if (isLocalActorId(actor.id)) {
+    console.warn(`[signer-key] Refusing to cache remote document claiming local id: ${actor.id}`);
+    return;
+  }
   const username = actor.preferredUsername ?? actor.id.split("/").filter(Boolean).pop() ?? actor.id;
   let domain = "";
   try {
     domain = new URL(actor.id).hostname;
-  } catch { /* keep empty */ }
+  } catch {
+    return; // unparseable id — never cache
+  }
   const pem = publicKeyPemFor(actor, "");
   await db
     .prepare(
@@ -86,10 +123,11 @@ export async function cacheRemoteActor(db: D1Database, actor: APActor): Promise<
          summary = excluded.summary,
          avatar_url = excluded.avatar_url,
          header_url = excluded.header_url,
-         public_key_pem = excluded.public_key_pem,
+         public_key_pem = CASE WHEN excluded.public_key_pem != '' THEN excluded.public_key_pem ELSE actors.public_key_pem END,
          inbox = excluded.inbox,
          shared_inbox = COALESCE(NULLIF(excluded.shared_inbox, ''), actors.shared_inbox),
-         updated_at = datetime('now')`
+         updated_at = datetime('now')
+       WHERE actors.is_local = 0`
     )
     .bind(
       actor.id,
@@ -135,6 +173,12 @@ export async function resolveSignerKey(
   )) as APActor | null;
   if (!fetched?.id || typeof fetched.id !== "string") {
     return { ok: false, permanent: false, status: 0 };
+  }
+  // The served document must be the actor we asked for: a remote server must
+  // not be able to answer for someone else's id (key substitution attack).
+  if (fetched.id !== actorId) {
+    console.warn(`[signer-key] Actor id mismatch: requested ${actorId}, got ${fetched.id}`);
+    return { ok: false, permanent: true, status: 0 };
   }
 
   const pem = publicKeyPemFor(fetched, keyId);

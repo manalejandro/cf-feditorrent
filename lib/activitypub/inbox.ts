@@ -9,13 +9,15 @@ import {
   createFollow,
   updateFollowState,
   deleteFollow,
-  updateActorCounts,
+  bumpActorCount,
   createNotification,
   getFollowByActivityId,
   getFollow,
 } from "@/lib/db";
 import { buildAccept, generateId } from "./utils";
-import { deliverToInbox, fetchRemoteObject } from "./federation";
+import { fetchRemoteObject } from "./federation";
+import { enqueueDeliveries, type APDeliveryMessage } from "./queue";
+import type { Queue } from "@cloudflare/workers-types";
 import { cacheRemoteActor, type LocalSigningKey } from "./signer-key";
 
 interface InboxContext {
@@ -28,6 +30,12 @@ interface InboxContext {
    */
   signingActorId?: string | null;
   signingKey?: LocalSigningKey | null;
+  /**
+   * Delivery queue: outbound activities generated while processing (Accept of
+   * a Follow) are enqueued instead of blocking the sender's request for the
+   * full double-knock timeout (remote senders may wait >20s otherwise).
+   */
+  queue?: Queue<APDeliveryMessage> | null;
 }
 
 export async function processInboxActivity(activity: APActivity, ctx: InboxContext): Promise<void> {
@@ -102,6 +110,7 @@ async function handleFollow(activity: APActivity, ctx: InboxContext): Promise<vo
   if (!followerActor) return;
 
   const existing = await getFollow(ctx.db, actorId, targetId);
+  let isNewFollow = false;
   if (!existing) {
     await createFollow(ctx.db, {
       id: generateId(),
@@ -111,19 +120,18 @@ async function handleFollow(activity: APActivity, ctx: InboxContext): Promise<vo
       activityId: activity.id,
       createdAt: new Date().toISOString(),
     });
+    isNewFollow = true;
+  } else if (existing.state !== "accepted") {
+    // Re-follow after an Undo/Reject: accept again.
+    await updateFollowState(ctx.db, existing.id, "accepted");
+    isNewFollow = true;
   }
 
   const acceptId = generateId();
   const acceptActivity = buildAccept(ctx.baseUrl, ctx.recipient.id, activity, acceptId);
 
-  if (!existing) {
-    const actor = await getActorById(ctx.db, targetId);
-    if (actor) {
-      await updateActorCounts(ctx.db, targetId, { followersCount: (actor.followersCount ?? 0) + 1 });
-    }
-  }
-
-  if (!existing) {
+  if (isNewFollow) {
+    await bumpActorCount(ctx.db, targetId, "followers_count", 1);
     await createNotification(ctx.db, {
       id: generateId(),
       type: "follow",
@@ -134,7 +142,16 @@ async function handleFollow(activity: APActivity, ctx: InboxContext): Promise<vo
 
   const requesterInbox = followerActor.inbox ?? `${followerActor.id.replace(/\/$/, "")}/inbox`;
   if (requesterInbox) {
-    await deliverToInbox(requesterInbox, acceptActivity, `${ctx.recipient.id}#main-key`, ctx.recipient.privateKeyPem);
+    // Enqueued when possible: never make the remote sender wait on our
+    // outbound delivery (falls back to direct HTTP without a queue binding).
+    await enqueueDeliveries(
+      ctx.queue,
+      [requesterInbox],
+      JSON.stringify(acceptActivity),
+      ctx.recipient.id,
+      `${ctx.recipient.id}#main-key`,
+      ctx.recipient.privateKeyPem
+    );
   }
 }
 
@@ -149,14 +166,9 @@ async function handleAccept(activity: APActivity, ctx: InboxContext): Promise<vo
   if (actorId !== row.targetId) return;
 
   await updateFollowState(ctx.db, row.id, "accepted");
+  await bumpActorCount(ctx.db, row.actorId, "following_count", 1);
+  await bumpActorCount(ctx.db, row.targetId, "followers_count", 1);
   const follower = await getActorById(ctx.db, row.actorId);
-  if (follower?.isLocal) {
-    await updateActorCounts(ctx.db, row.actorId, { followingCount: (follower.followingCount ?? 0) + 1 });
-  }
-  const followed = await getActorById(ctx.db, row.targetId);
-  if (followed) {
-    await updateActorCounts(ctx.db, row.targetId, { followersCount: (followed.followersCount ?? 0) + 1 });
-  }
   if (follower?.isLocal) {
     await createNotification(ctx.db, {
       id: generateId(),
@@ -200,9 +212,9 @@ async function handleUndo(activity: APActivity, ctx: InboxContext): Promise<void
       const follow = await getFollow(ctx.db, actorId, targetId);
       if (!follow) return;
       await deleteFollow(ctx.db, actorId, targetId);
-      const target = await getActorById(ctx.db, targetId);
-      if (target) {
-        await updateActorCounts(ctx.db, targetId, { followersCount: Math.max(0, (target.followersCount ?? 0) - 1) });
+      // Only undo the counters when the follow was actually counted (accepted).
+      if (follow.state === "accepted") {
+        await bumpActorCount(ctx.db, targetId, "followers_count", -1);
       }
     }
   }
@@ -265,7 +277,10 @@ async function ensureActorCached(
       followers: `${actor.id}/followers`,
       following: `${actor.id}/following`,
       publicKey: { id: `${actor.id}#main-key`, owner: actor.id, publicKeyPem: actor.publicKeyPem },
-      endpoints: { sharedInbox: `${new URL(actor.id).origin}/inbox` },
+      // Use the shared inbox the actor actually published, not a guess.
+      endpoints: actor.sharedInbox
+        ? { sharedInbox: actor.sharedInbox }
+        : { sharedInbox: `${new URL(actor.id).origin}/inbox` },
     } as APActor;
   }
   try {

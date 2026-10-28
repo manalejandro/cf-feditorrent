@@ -11,10 +11,15 @@ export async function GET(request: NextRequest) {
   const raw = await env.TORRENTS_KV.get(infoHash);
   if (!raw) return json({ valid: false, infoHash });
 
-  const torrentData = JSON.parse(raw);
-  const EXPIRY_MINUTES = parseInt(env.TORRENT_EXPIRY_MINUTES || "30");
+  let torrentData: { token?: string; timestamp?: number };
+  try {
+    torrentData = JSON.parse(raw);
+  } catch {
+    return json({ valid: false, infoHash });
+  }
+  const EXPIRY_MINUTES = parseInt(env.TORRENT_EXPIRY_MINUTES || "30", 10) || 30;
   const now = Date.now();
-  const isExpired = now - torrentData.timestamp > EXPIRY_MINUTES * 60 * 1000;
+  const isExpired = now - (torrentData.timestamp ?? 0) > EXPIRY_MINUTES * 60 * 1000;
 
   if (isExpired) {
     await env.TORRENTS_KV.delete(infoHash);

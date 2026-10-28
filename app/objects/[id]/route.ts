@@ -1,25 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { activityJson, notFound } from "@/lib/cf";
-import { getObjectById, getTorrentById } from "@/lib/db";
-import { buildTorrentNote } from "@/lib/activitypub/utils";
+import { getObjectById, getTorrentByObjectId } from "@/lib/db";
+import { buildTorrentNote, objectIRI } from "@/lib/activitypub/utils";
 import { env } from "cloudflare:workers";
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  if (!/^[a-zA-Z0-9-]{1,64}$/.test(id)) return notFound("Object not found");
 
-  const obj = await getObjectById(env.DB, id);
+  // Objects are stored under their full IRI (`${INSTANCE_URL}/objects/<uuid>`),
+  // but this route receives only the <uuid> segment — reconstruct before lookup
+  // (the old code searched by bare uuid and ALWAYS 404'd).
+  const obj = await getObjectById(env.DB, objectIRI(env.INSTANCE_URL, id));
   if (!obj) return notFound("Object not found");
+
+  const torrent = await getTorrentByObjectId(env.DB, obj.id);
 
   const accept = request.headers.get("accept") ?? "";
   if (!accept.includes("application/activity+json") && !accept.includes("application/ld+json")) {
-    const url = obj.url;
-    if (url) return NextResponse.redirect(url);
+    // Humans land on the torrent page; fall back to the object url.
+    if (torrent) return NextResponse.redirect(`${env.INSTANCE_URL}/torrents/${torrent.slug}`);
+    if (obj.url) return NextResponse.redirect(obj.url);
     return notFound();
   }
 
-  const torrent = await getTorrentById(env.DB, obj.url?.split("/").pop() ?? "");
-
-  if (torrent && obj.raw && obj.raw !== "{}") {
+  if (obj.raw && obj.raw !== "{}") {
     try {
       const parsed = JSON.parse(obj.raw);
       return activityJson(parsed);

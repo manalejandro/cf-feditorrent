@@ -4,8 +4,19 @@ import { getTorrentBySlug, getActorById } from "@/lib/db";
 import { incrementTorrentClicks } from "@/lib/db";
 import { env } from "cloudflare:workers";
 import type { LocalActor, LocalTorrent } from "@/lib/types";
+
+/** Only render hrefs with safe schemes (blocks javascript:/data: stored XSS). */
+function safeHref(value: string, allowed: string[]): string {
+  try {
+    const parsed = new URL(value);
+    return allowed.includes(parsed.protocol) ? value : "";
+  } catch {
+    return "";
+  }
+}
+
 function renderTorrentPage(torrent: LocalTorrent & { fileUrl?: string | null }, actor: LocalActor | null, baseUrl: string): string {
-  const magnetUri = torrent.magnetUri || "";
+  const magnetUri = safeHref(torrent.magnetUri || "", ["magnet:"]);
   const size = torrent.size || 0;
   const sizeStr = size > 0
     ? size >= 1073741824 ? (size / 1073741824).toFixed(2) + " GB"
@@ -15,8 +26,11 @@ function renderTorrentPage(torrent: LocalTorrent & { fileUrl?: string | null }, 
     : "Unknown";
 
   const actorName = actor?.username || "Unknown";
-  const fileUrl = torrent.torrentFileUrl || torrent.fileUrl || (torrent.infoHash ? `${baseUrl}/api/files/${torrent.infoHash}/${encodeURIComponent(torrent.name)}` : "");
-  const torrentFileUrl = torrent.torrentFileUrl || "";
+  const fileUrl = safeHref(
+    torrent.torrentFileUrl || torrent.fileUrl || (torrent.infoHash ? `${baseUrl}/api/files/${torrent.infoHash}/${encodeURIComponent(torrent.name)}` : ""),
+    ["http:", "https:"]
+  );
+  const torrentFileUrl = safeHref(torrent.torrentFileUrl || "", ["http:", "https:"]);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -74,7 +88,7 @@ main{flex:1;max-width:720px;margin:0 auto;padding:2rem 1rem;width:100%}
 <h1>${escapeHtml(torrent.name)}</h1>
 <div class="actions">
 ${torrentFileUrl ? `<a href="${escapeHtml(torrentFileUrl)}" class="btn btn-secondary">\u{1F4E5} .torrent</a>` : ""}
-<a href="${escapeHtml(magnetUri)}" class="btn btn-primary">\u{1F9F2} Magnet</a>
+${magnetUri ? `<a href="${escapeHtml(magnetUri)}" class="btn btn-primary">\u{1F9F2} Magnet</a>` : ""}
 </div>
 </div>
 ${torrent.description ? `<p class="desc">${escapeHtml(torrent.description)}</p>` : ""}
@@ -141,22 +155,30 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
   }
 
-  incrementTorrentClicks(env.DB, torrent.id).catch(() => {});
+  // Awaited: a fire-and-forget promise can be cancelled once the response is
+  // sent, silently losing clicks.
+  try {
+    await incrementTorrentClicks(env.DB, torrent.id);
+  } catch { /* clicks are best-effort */ }
 
   const actor = await getActorById(env.DB, torrent.actorId);
 
-  // Browser visits get the HTML page directly
-  if (accept.includes("text/html") || accept.includes("*/*")) {
-    const baseUrl = env.INSTANCE_URL || `${request.nextUrl.protocol}//${request.nextUrl.host}`;
-    return new Response(renderTorrentPage(torrent, actor, baseUrl), {
-      headers: { "Content-Type": "text/html; charset=utf-8" },
+  // Explicit JSON negotiation: browsers (text/html or */*) get the HTML page,
+  // API clients must ask for JSON. The previous "*/* → HTML" rule forced every
+  // fetch() caller to set Accept manually and broke plain fetches.
+  if (accept.includes("application/json")) {
+    return json({
+      ...torrent,
+      actorUsername: actor?.username ?? null,
+      actorDomain: actor?.domain ?? null,
     });
   }
 
-  // API/fetch requests get JSON
-  return json({
-    ...torrent,
-    actorUsername: actor?.username ?? null,
-    actorDomain: actor?.domain ?? null,
+  const baseUrl = env.INSTANCE_URL || `${request.nextUrl.protocol}//${request.nextUrl.host}`;
+  return new Response(renderTorrentPage(torrent, actor, baseUrl), {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "X-Content-Type-Options": "nosniff",
+    },
   });
 }
